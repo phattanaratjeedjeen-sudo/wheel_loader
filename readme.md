@@ -2,8 +2,18 @@
 
 
 ## Table of Contents
+- [Project Overview](#project-overview)
 - [Wheel Loader Model](#wheel-loader-model)
 - [Reference](#reference)
+
+
+## Project Overview
+
+### Environment
+- OS: ubuntu 24.04
+- MATLAB 2025b 
+
+### File Structure
 
 
 ## Wheel Loader Model
@@ -75,6 +85,51 @@
 | **LloadG**| load center length | - |
 | **HloadG**| load center angle | - |
 | **Hbmcyl**| lift arm cylinder angle | - |
+
+
+### Equations
+
+
+#### Phase 1: Link Posture Angles & Base Distances
+These formulas rely on the law of cosines and geometric constants to establish the fundamental angles of the linkage based on the lift arm angle $\theta_g$.
+
+| Sequence | Doc Formula | Equation | Description / Purpose |
+| :--- | :---: | :--- | :--- |
+| **1** | (15) | $L_{df} = \sqrt{L_{dg}^2 + L_{fg}^2 - 2L_{dg}\{L_{fgX}\cos(\theta_g + \angle DGA) + L_{fgY}\sin(\theta_g + \angle DGA)\}}$ | Calculates the distance between bell crank D pin and bucket cylinder root F pin. |
+| **2** | (16) | $L_{af} = \sqrt{L_{ag}^2 + L_{fg}^2 - 2L_{ag}L_{fg}\cos(\theta_g - \angle FGO)}$ | Calculates the distance between lift arm tip A pin and bucket cylinder root F pin. |
+| **3** | (17) | $\theta_f = \tan^{-1}\{\frac{L_{dg}\sin(\theta_g + \angle DGA) - L_{fgY}}{L_{dg}\cos(\theta_g + \angle DGA) - L_{fgX}}\} + \cos^{-1}(\frac{L_{df}^2 + L_{ef}^2 - L_{de}^2}{2L_{df}L_{ef}})$ | Derives the bucket cylinder posture angle. |
+| **4** | (18) | $\theta_e = \cos^{-1}(\frac{L_{de}^2 + L_{ef}^2 - L_{df}^2}{2L_{de}L_{ef}}) - 180$ | Derives the bell crank posture angle. |
+| **5** | (19) | $\angle ADC = \cos^{-1}(\frac{L_{ad}^2 + L_{dg}^2 - L_{ag}^2}{2L_{ad}L_{dg}}) + \cos^{-1}(\frac{L_{df}^2 + L_{de}^2 - L_{ef}^2}{2L_{df}L_{de}}) - 180 - \theta_d$ | Derives the angle $\angle ADC$. |
+| **6** | (20) | $L_{ac} = \sqrt{L_{ad}^2 + L_{cd}^2 - 2L_{ad}L_{cd}\cos\angle ADC}$ | Calculates the distance between lift arm tip A pin and center C pin. |
+| **7** | (21) | $\theta_c = 180 + \cos^{-1}(\frac{L_{ac}^2 + L_{bc}^2 - L_{ab}^2}{2L_{ac}L_{bc}}) - \cos^{-1}(\frac{L_{cd}^2 + L_{ac}^2 - L_{ad}^2}{2L_{cd}L_{ac}})$ | Derives the link angle $\theta_c$. |
+| **8** | (22) | $\theta_b = \cos^{-1}(\frac{L_{ab}^2 + L_{bc}^2 - L_{ac}^2}{2L_{ab}L_{bc}}) - 180$ | Derives the link angle $\theta_b$. |
+| **9** | (14) | $\theta_i = \tan^{-1}\{\frac{L_{gi}\sin(\theta_g + H_{bmcyl}) + L_{ghY}}{L_{gi}\cos(\theta_g + H_{bmcyl}) + L_{ghX}}\} - (\theta_g + H_{bmcyl})$ | Derives the posture angle required to calculate the horizontal distance $f$. |
+
+#### Phase 2: Inter-Link Distances & Load Coordinates
+By substituting the variables from Phase 1 into trigonometric functions, the system determines the specific horizontal and vertical inter-link distances.
+
+| Sequence | Doc Formula | Equation | Description / Purpose |
+| :--- | :---: | :--- | :--- |
+| **10** | (7) | $a = L_{loadG}\cos(\theta_g + \theta_c + \theta_d + \theta_e - \theta_b + 180 - H_{loadG})$ | Calculates the horizontal length between load center and bucket pin hinge pin. |
+| **11** | (8) | $b = -L_{ab}\sin\theta_b$ | Calculates distance $b$. |
+| **12** | (9) | $c = L_{cd}\sin\theta_c$ | Calculates distance $c$. |
+| **13** | (10) | $d = -L_{de}\sin\theta_e$ | Calculates distance $d$. |
+| **14** | (11) | $e = L_{fg}\sin\{(180 - \theta_f) + \angle FGO\}$ | Calculates the horizontal length between hinge pin and vector of $F_b$. |
+| **15** | (12) | $f = L_{gi}\sin\theta_i$ | Calculates the horizontal length between hinge pin and vector of $F_c$. |
+| **16** | (13) | $L_w = L_{ag}\cos\theta_g + L_{loadG}\cos(\theta_g + \theta_c + \theta_d + \theta_e - \theta_b + 180 - H_{loadG})$ | Calculates the horizontal length from gravity center position of load. |
+
+#### Phase 3: Force, Moment, and Final Load Calculation
+Using the geometric distances from Phase 2 and the actual cylinder pressures, the system calculates the internal forces, the moments around the hinge pin, and finally the payload $W$.
+
+| Sequence | Doc Formula | Equation | Description / Purpose |
+| :--- | :---: | :--- | :--- |
+| **17** | (3) | $F_c = n(A_b P_b - A_r P_r)$ | Calculates the force applied to the lift arm cylinder using bottom and rod pressures. |
+| **18** | (4) | $F_b = W \cdot (\frac{a}{b}) \cdot (\frac{c}{d})$ | Calculates the theoretical force applied to the bucket cylinder based on moment equilibrium. |
+| **19** | (1) | $M = F_c f + F_b e$ | Derives the general moment around the lift arm hinge pin supported by the cylinders. |
+| **20** | (5) | $M_1 = 2f(A_b P_b - A_r P_r) + W(\frac{a \cdot c \cdot e}{b \cdot d})$ | Expresses the moment $M_1$ in the loaded state by combining formulas 1, 3, and 4. |
+| **21** | (2) | $W = \frac{M_1 - M_0}{L_w}$ | General relational expression for calculating load $W$ from loaded and unloaded moments. |
+| **22** | (6) | $W = \frac{2f(A_b P_b - A_r P_r) - M_0}{L_w - (\frac{a \cdot c \cdot e}{b \cdot d})}$ | **The Final Load Calculation Formula:** Determined by substituting formula 5 into formula 2 to solve for $W$ directly from sensor values. |
+
 
 ## Reference
 * **Patent:** US 2020/0131739 A1 (Hitachi Construction Machinery, Apr. 30, 2020). 

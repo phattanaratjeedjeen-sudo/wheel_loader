@@ -8,47 +8,12 @@ This instruction is created for launch ros2 package that required envrion which 
 | ROS2 | Humble | Jazzy |
 | Gazebo | Classic 11.10.2 | Harmonic |
 
-## Steps
 
-Allow Screen Access (Once per reboot)
-```bash
-xhost +local:root
-```
-
-Navigate to your ROS 2 Workspace root folder
-```bash
-cd ~/path/to/your/workspace_root_folder
-```
-
-Run the Docker Container
-```bash
-docker run -it \
-  --name ros2_humble \
-  --net=host \
-  --env="DISPLAY" \
-  --env="QT_X11_NO_MITSHM=1" \
-  --volume="/tmp/.X11-unix:/tmp/.X11-unix:rw" \
-  --volume="/dev/dri:/dev/dri" \
-  --volume="$(pwd):/workspace:rw" \
-  --workdir="/workspace" \
-  osrf/ros:humble-desktop-full \
-  /bin/bash
-```
-
-Install Dependencies and Build (Inside the Container)
-```bash
-apt update
-apt install ros-humble-gazebo-ros-pkgs ros-humble-gazebo-ros2-control -y
-```
-
-```bash
-colcon build && source install/setup.bash
-```
-
-Opening multiple terminals
-```bash
-docker exec -it ros2_humble /bin/bash
-```
+## Table of Contents
+- [Enable RTX for Container](#enable-rtx-for-container)
+- [Docker Files](#docker-files)
+- [Setup Container)](#setup-container)
+- [Tips](#tips)
 
 ## Enable RTX for Container
 Install the NVIDIA Container Toolkit
@@ -70,8 +35,57 @@ sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
 ```
 
+## Docker Files
 
-## Alternative Ways (Docker Compose)
+Create `docker-compose.yaml` and `Dockerfile`. Place these files at your workspace's directory.
+
+```bash
+# docker-compose.yaml
+services:
+  ros2:
+    build: .
+    container_name: ros2_humble
+    network_mode: host
+    stdin_open: true 
+    tty: true      
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - ROS_DOMAIN_ID=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - .:/workspace:rw  
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    working_dir: /workspace
+    command: /bin/bash
+```
+
+```bash
+# Dockerfile
+FROM osrf/ros:humble-desktop-full
+
+# Automatically install Gazebo and ROS control dependencies during build
+RUN apt-get update && apt-get install -y \
+    ros-humble-gazebo-ros-pkgs \
+    ros-humble-gazebo-ros2-control \
+    ros-humble-ros2-controllers \
+    ros-humble-xacro \
+    ros-humble-tf-transformations \
+    && rm -rf /var/lib/apt/lists/*
+
+# Force the colorful prompt for the root user
+RUN sed -i 's/^#force_color_prompt=yes/force_color_prompt=yes/' /root/.bashrc
+```
+
+## Setup Container
 Create the `Dockerfile` at your workspace's directory
 ```bash
 FROM osrf/ros:humble-desktop-full

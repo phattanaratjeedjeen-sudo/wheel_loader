@@ -35,61 +35,61 @@
 
 ### Variables
 #### Load Calculation Variables
-| Variable | Description | Unit |
-| :--- | :--- | :--- |
-| **n** | number of cylinders | - |
-| **Ab** | bottom side pressure receiving area of cylinder | cm² |
-| **Pb** | bottom pressure of cylinder | MPa |
-| **Ar** | rod side pressure receiving area of cylinder | cm² |
-| **Pr** | rod pressure of cylinder | MPa |
-| **M** | moment around lift arm hinge pin | Nm |
-| **Fc** | force applied to lift arm cylinder | N |
-| **Fb** | force applied to bucket cylinder | N |
-| **f** | horizontal length between hinge pin and vector of Fc | m |
-| **e** | horizontal length between hinge pin and vector of Fb | m |
-| **a** | horizontal length between load center and bucket pin hinge pin | m |
-| **b** | distance between bucket pins | m |
-| **c** | distance between push rod center length and bell crank center pin | m |
-| **d** | distance between bell crank pins | m |
-| **M1** | moment around lift arm hinge pin in loaded state | Nm |
-| **M0** | moment around lift arm hinge pin in unloaded state | Nm |
-| **W** | load | kg |
-| **Lw** | horizontal length from gravity center position of load | - |
 
-#### Dimension & Linkage Posture Variabless
-| Variable | Description | Unit |
-| :--- | :--- | :--- |
-| **θg** | Lift arm angle ∠(horizontal, Lag) | deg |
-| **Ldf** | Length between bell crank D pin and bucket cylinder root F pin | mm |
-| **Ldg** | Length between bell crank D pin and lift arm hinge G pin | mm |
-| **Lfg** | Length between bucket cylinder root F pin and lift arm hinge G pin | mm |
-| **LfgX** | Horizontal length between bucket cylinder root F pin and lift arm hinge G pin | mm |
-| **LfgY** | Vertical length between bucket cylinder root F pin and lift arm hinge G pin | mm |
-| **∠DGA** | ∠(Ldg, Lag) | deg |
-| **Laf** | Length between lift arm tip A pin and bucket cylinder root F pin | mm |
-| **Lag** | Length between lift arm tip A pin and hinge G pin | mm |
-| **∠FGO** | ∠(Lfg, Horizontal) | deg |
-| **θf** | Bucket cylinder posture angle ∠(horizontal, Lef) | deg |
-| **Lef** | Bucket cylinder stroke length | mm |
-| **θe** | Bell crank posture angle ∠(Lde, Lef) | deg |
-| **Lde** | Bell crank DE pin length | mm |
-| **∠ADC** | ∠(Lad, Lcd) | deg |
-| **Lad** | Length between lift arm tip A pin and center D pin | mm |
-| **θd** | ∠(Lde, Lcd) | deg |
-| **Lac** | Length between lift arm tip A pin and center C pin | mm |
-| **Lcd** | Bell crank CD pin length | mm |
-| **θc** | ∠(Lcd, Lbc) | deg |
-| **Lbc** | Distance between push rod BC pins | mm |
-| **Lab** | Distance between bucket AB pins | mm |
-| **θb** | ∠(Lbc, Lab) | deg |
-| **LloadG**| load center length | - |
-| **HloadG**| load center angle | - |
-| **Hbmcyl**| lift arm cylinder angle | - |
+| Variable | Description | Unit | Source |
+| :--- | :--- | :--- | :--- |
+| **n** | number of cylinders | - | pre-stored |
+| **Ab** | bottom side pressure receiving area of cylinder | cm² | pre-stored |
+| **Pb** | bottom pressure of cylinder | MPa | measured  |
+| **Ar** | rod side pressure receiving area of cylinder | cm² | pre-stored |
+| **Pr** | rod pressure of cylinder | MPa | measured |
+| **M** | moment around lift arm hinge pin | Nm | cal  |
+| **Fc** | force applied to lift arm cylinder | N | cal  |
+| **Fb** | force applied to bucket cylinder | N | cal  |
+| **f** | horizontal length between hinge pin and vector of Fc | m | cal 221 |
+| **e** | horizontal length between hinge pin and vector of Fb | m | cal 221 |
+| **a** | horizontal length between load center and bucket pin hinge pin | m | cal |
+| **b** | distance between bucket pins | m | cal |
+| **c** | distance between push rod center length and bell crank center pin | m | cal |
+| **d** | distance between bell crank pins | m | cal |
+| **M1** | moment around lift arm hinge pin in loaded state | Nm | cal |
+| **M0** | moment around lift arm hinge pin in unloaded state | Nm | pre-stored |
+| **W** | load | kg | cal |
+| **Lw** | horizontal length from gravity center position of load | - | cal |
+
+#### Dimension & Linkage Posture Variables
+
+| Variable | Description | Unit | Source |
+| :--- | :--- | :--- | :--- |
+| **θg** | Lift arm angle ∠(horizontal, Lag) | deg | measured |
+| **Ldf** | Length between bell crank D pin and bucket cylinder root F pin | mm | cal |
+| **Ldg** | Length between bell crank D pin and lift arm hinge G pin | mm | pre-stored |
+| **Lfg** | Length between bucket cylinder root F pin and lift arm hinge G pin | mm | pre-stored |
+| **LfgX** | Horizontal length between bucket cylinder root F pin and lift arm hinge G pin | mm | pre-stored |
+| **LfgY** | Vertical length between bucket cylinder root F pin and lift arm hinge G pin | mm | pre-stored |
+| **∠DGA** | ∠(Ldg, Lag) | deg | pre-stored |
+| **Laf** | Length between lift arm tip A pin and bucket cylinder root F pin | mm | cal |
+| **Lag** | Length between lift arm tip A pin and hinge G pin | mm | pre-stored |
+| **∠FGO** | ∠(Lfg, Horizontal) | deg | pre-stored |
+| **θf** | Bucket cylinder posture angle ∠(horizontal, Lef) | deg | cal |
+| **Lef** | Bucket cylinder stroke length | mm | pre-stored |
+| **θe** | Bell crank posture angle ∠(Lde, Lef) | deg | cal |
+| **Lde** | Bell crank DE pin length | mm | pre-stored |
+| **∠ADC** | ∠(Lad, Lcd) | deg | cal |
+| **Lad** | Length between lift arm tip A pin and center D pin | mm | pre-stored |
+| **θd** | ∠(Lde, Lcd) | deg | cal |
+| **Lac** | Length between lift arm tip A pin and center C pin | mm | cal |
+| **Lcd** | Bell crank CD pin length | mm | pre-stored |
+| **θc** | ∠(Lcd, Lbc) | deg | cal |
+| **Lbc** | Distance between push rod BC pins | mm | pre-stored |
+| **Lab** | Distance between bucket AB pins | mm | pre-stored |
+| **θb** | ∠(Lbc, Lab) | deg | cal |
+| **LloadG**| load center length | - | pre-stored |
+| **HloadG**| load center angle | - | pre-stored |
+| **Hbmcyl**| lift arm cylinder angle | - | pre-stored |
 
 
 ### Equations
-
-
 #### Phase 1: Link Posture Angles & Base Distances
 These formulas rely on the law of cosines and geometric constants to establish the fundamental angles of the linkage based on the lift arm angle $\theta_g$.
 

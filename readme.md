@@ -21,14 +21,14 @@
 <table align="center" style="border:none;">
   <tr>
     <td align="center" width="50%">
-      <img src="./material/model_overall.png" alt="overall model" width="100%"/>
+      <img src="" alt="" width="100%"/>
       <br>
-      <em>Overall model</em>
+      <em></em>
     </td>
     <td align="center" width="50%">
-      <img src="./material/model_detail.png" alt="detail model" width="88%"/>
+      <img src="" alt="" width="88%"/>
       <br>
-      <em>Detail model</em>
+      <em></em>
     </td>
   </tr>
 </table>
@@ -46,8 +46,8 @@
 | **M** | moment around lift arm hinge pin | Nm | cal  |
 | **Fc** | force applied to lift arm cylinder | N | cal  |
 | **Fb** | force applied to bucket cylinder | N | cal  |
-| **f** | horizontal length between hinge pin and vector of Fc | m | cal 221 |
-| **e** | horizontal length between hinge pin and vector of Fb | m | cal 221 |
+| **f** | horizontal length between hinge pin and vector of Fc | m | cal  |
+| **e** | horizontal length between hinge pin and vector of Fb | m | cal  |
 | **a** | horizontal length between load center and bucket pin hinge pin | m | cal |
 | **b** | distance between bucket pins | m | cal |
 | **c** | distance between push rod center length and bell crank center pin | m | cal |
@@ -55,7 +55,7 @@
 | **M1** | moment around lift arm hinge pin in loaded state | Nm | cal |
 | **M0** | moment around lift arm hinge pin in unloaded state | Nm | pre-stored |
 | **W** | load | kg | cal |
-| **Lw** | horizontal length from gravity center position of load | - | cal |
+| **Lw** | horizontal length from gravity center position of load | m | cal |
 
 #### Dimension & Linkage Posture Variables
 
@@ -84,9 +84,9 @@
 | **Lbc** | Distance between push rod BC pins | mm | pre-stored |
 | **Lab** | Distance between bucket AB pins | mm | pre-stored |
 | **θb** | ∠(Lbc, Lab) | deg | cal |
-| **LloadG**| load center length | - | pre-stored |
-| **HloadG**| load center angle | - | pre-stored |
-| **Hbmcyl**| lift arm cylinder angle | - | pre-stored |
+| **LloadG**| load center length | m | pre-stored |
+| **HloadG**| load center angle | m | pre-stored |
+| **Hbmcyl**| lift arm cylinder angle | deg | pre-stored |
 
 
 ### Equations

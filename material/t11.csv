@@ -1,0 +1,10 @@
+Series,Current,Min,Max,Average
+Start Time,-1.79769e+308
+End Time,1.79769e+308
+Current Time,1.78255e+09
+/vehicle/loader_joint_angles/data[0],0.001150,0.001007,0.002708,0.001150
+/vehicle/loader_joint_angles/data[1],-0.005153,-0.005417,0.029961,-0.004098
+/vehicle/loader_joint_angles/layout/data_offset,0.000000,0.000000,0.000000,0.000000
+/vehicle/loader_joint_pressures/data[0],649.000000,293.000000,760.000000,639.177822
+/vehicle/loader_joint_pressures/data[1],951.000000,379.000000,1199.000000,955.725275
+/vehicle/loader_joint_pressures/layout/data_offset,0.000000,0.000000,0.000000,0.000000

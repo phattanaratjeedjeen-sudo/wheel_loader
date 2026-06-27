@@ -17,7 +17,7 @@ endif()
 
 ################ FIND DEPENDENCIES  #################
 find_package(ament_cmake REQUIRED)		# cpp (optional)
-find_package(rclcpp REQUIRED)			# cpp (optional)
+find_package(rclcpp REQUIRED)			    # cpp (optional)
 find_package(ament_cmake_python REQUIRED)   	# python (optional)
 find_package(rclpy REQUIRED)                	# python (optional)
 ######################################################
@@ -28,6 +28,8 @@ ament_python_install_package(${PROJECT_NAME})
 # Install Python executables
 install(PROGRAMS
   scripts/dummy_script.py
+  scripts/load_est.py
+  scripts/sensor_filter.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -48,6 +50,8 @@ install(TARGETS
 ################ INSTALL LAUNCH, ETC #################
 install(DIRECTORY
   # add directories here
+  launch
+  config
   DESTINATION share/${PROJECT_NAME})
 
 ament_package()

@@ -6,3 +6,7 @@ log/
 
 matlab/slprj
 docker_launch.md
+
+# results/bag
+# results/csv
+# src/load_estimation/scripts/others

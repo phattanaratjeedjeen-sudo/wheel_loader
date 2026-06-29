@@ -4,6 +4,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float64MultiArray
 from std_srvs.srv import Trigger
+import asyncio
 from collections import deque
 import numpy as np
 
@@ -42,10 +43,10 @@ class LoadEstimation(Node):
         self.Ar = 0.014;    # rod cross-section area
 
         # measured
-        self.theta_g = None # lift arm angle rel. horizontal or AGO (deg)
+        self.theta_g = None # AGO (deg)
         self.theta_t = None # FEC (deg)
-        self.Pb = None      # bottom cylinder pressure (MPa)
-        self.Pr = None      # rod side pressure (MPa)
+        self.Pb = None      # bottom cylinder pressure (Pa)
+        self.Pr = None      # rod side pressure (Pa)
 
         # filter
         self.window_size = 50
@@ -86,12 +87,12 @@ class LoadEstimation(Node):
         median_r = np.median(self.r_history)
 
         # offset cal
-        load_Pb = 0
-        load_Pr = 0
+        offset_b = 3874 + 2727*median_b + -912*median_b**2
+        offset_r = 36.5*median_r  + 394
 
-        # raw2Mpa
-        self.Pb = (400/32767 * load_Pb) * 0.1
-        self.Pr = (400/32767 * load_Pr) * 0.1
+        # sensor_val2Pa, pure_load pressure
+        self.Pb = (median_b - offset_b) * (40*10**6)/32767
+        self.Pr = (median_r - offset_r) * (40*10**6)/32767
 
     def angle_callback(self, msg:Float64MultiArray):
         self.theta_g = msg.data[0]
@@ -102,93 +103,97 @@ class LoadEstimation(Node):
             self.get_logger().warn("Load estimation called before all sensor data is available.", throttle_duration_sec=1)
             return None
 
-        # eq 15
-        FGD = self.FGO + self.theta_g + self.DGA
-        Ldf = np.sqrt(self.Lfg**2 + self.Ldg**2 - 2*self.Lfg*self.Ldg*np.cos(FGD))
+        try:
+            # eq 15
+            FGD = self.FGO + self.theta_g + self.DGA
+            Ldf = np.sqrt(self.Lfg**2 + self.Ldg**2 - 2*self.Lfg*self.Ldg*np.cos(FGD))
 
-        # eq 16
-        Laf = np.sqrt(self.Lag**2 + self.Lfg**2 - 2*self.Lag*self.Lfg*np.cos(self.theta_g - self.FGO))
+            # eq 16
+            Laf = np.sqrt(self.Lag**2 + self.Lfg**2 - 2*self.Lag*self.Lfg*np.cos(self.theta_g - self.FGO))
 
-        # add
-        DEF = self.theta_t + self.DEC
-        EFD = np.arcsin(self.Lde * np.sin(DEF) / Ldf)
-        EDF = np.pi - EFD - DEF
+            # add
+            DEF = self.theta_t + self.DEC
+            EFD = np.arcsin(self.Lde * np.sin(DEF) / Ldf)
+            EDF = np.pi - EFD - DEF
 
-        # tilt prismatic length
-        Lef = self.Lde * np.sin(EDF) / np.sin(EFD)
+            # tilt prismatic length
+            Lef = self.Lde * np.sin(EDF) / np.sin(EFD)
 
-        # eq 17
-        a3 = self.Ldg * np.sin(self.theta_g + self.DGA) - self.LfgY
-        a4 = self.Ldg * np.cos(self.theta_g + self.DGA) - self.LfgX
-        a5 = Ldf**2 + Lef**2 - self.Lde**2
-        a6 = 2 * Ldf * Lef
-        theta_f = np.arctan2(a3, a4) + np.arccos(a5/a6)
+            # eq 17
+            a3 = self.Ldg * np.sin(self.theta_g + self.DGA) - self.LfgY
+            a4 = self.Ldg * np.cos(self.theta_g + self.DGA) - self.LfgX
+            a5 = Ldf**2 + Lef**2 - self.Lde**2
+            a6 = 2 * Ldf * Lef
+            theta_f = np.arctan2(a3, a4) + np.arccos(a5/a6)
 
-        # eq 18
-        theta_e = -(np.pi - self.DEC - self.theta_t)
+            # eq 18
+            theta_e = -(np.pi - self.DEC - self.theta_t)
 
-        # eq 19
-        a9 = self.Lad**2 + self.Ldg**2 - self.Lag**2
-        a10 = 2 * self.Lad * self.Ldg
-        ADC = np.arccos(a9/a10) + EDF - np.pi - self.theta_d
+            # eq 19
+            a9 = self.Lad**2 + self.Ldg**2 - self.Lag**2
+            a10 = 2 * self.Lad * self.Ldg
+            ADC = np.arccos(a9/a10) + EDF - np.pi - self.theta_d
 
-        # eq 20
-        Lac = np.sqrt(self.Lad**2 + self.Lcd**2 - 2*self.Lad*self.Lcd*np.cos(ADC))
+            # eq 20
+            Lac = np.sqrt(self.Lad**2 + self.Lcd**2 - 2*self.Lad*self.Lcd*np.cos(ADC))
 
-        # eq 21
-        a13 = Lac**2 + self.Lbc**2 - self.Lab**2
-        a14 = 2 * Lac * self.Lbc
-        a15 = self.Lcd**2 + Lac**2 - self.Lad**2
-        a16 = 2 * self.Lcd * Lac
-        theta_c = np.pi + np.arccos(a13/a14) - np.arccos(a15/a16)
+            # eq 21
+            a13 = Lac**2 + self.Lbc**2 - self.Lab**2
+            a14 = 2 * Lac * self.Lbc
+            a15 = self.Lcd**2 + Lac**2 - self.Lad**2
+            a16 = 2 * self.Lcd * Lac
+            theta_c = np.pi + np.arccos(a13/a14) - np.arccos(a15/a16)
 
-        # eq 22
-        a17 = self.Lab**2 + self.Lbc**2 - Lac**2
-        a18 = 2 * self.Lab * self.Lbc
-        theta_b = np.arccos(a17/a18) - np.pi
+            # eq 22
+            a17 = self.Lab**2 + self.Lbc**2 - Lac**2
+            a18 = 2 * self.Lab * self.Lbc
+            theta_b = np.arccos(a17/a18) - np.pi
 
-        # lift prismatic length
-        Lih = np.sqrt(self.Lgh**2 + self.Lgi**2 - 2*self.Lgh*self.Lgi*np.cos(self.theta_g + self.IGO))
+            # lift prismatic length
+            Lih = np.sqrt(self.Lgh**2 + self.Lgi**2 - 2*self.Lgh*self.Lgi*np.cos(self.theta_g + self.IGO))
 
-        GIH = np.arcsin((self.Lgh/Lih) * np.sin(self.theta_g + self.IGO))
+            GIH = np.arcsin((self.Lgh/Lih) * np.sin(self.theta_g + self.IGO))
 
-        # eq 14
-        Hbmcyl = self.IGO - GIH
-        theta_i = np.pi - (self.IGO + Hbmcyl)
+            # eq 14
+            Hbmcyl = self.IGO - GIH
+            theta_i = np.pi - (self.IGO + Hbmcyl)
 
-        a = 0
-        # eq 8
-        b = -self.Lab * np.sin(theta_b)
-        # eq 9 
-        c = self.Lcd * np.sin(theta_c)
-        # eq 10
-        d = -self.Lde * np.sin(theta_e)
-        # eq 11
-        e = self.Lfg * np.sin(np.pi - theta_f + self.FGO)
-        # eq 12
-        f = self.Lgi * np.sin(theta_i)
-        # eq 13
-        Lw = self.Lag * np.cos(self.theta_g) + a
-        # force applied to lift arm cylinders
-        Fc = self.n * (self.Ab * self.Pb - self.Ar * self.Pr)  
-        W = Fc*f / (Lw - (a*c*e/b*d))
-        return W / 9.81
+            a = 0
+            # eq 8
+            b = -self.Lab * np.sin(theta_b)
+            # eq 9 
+            c = self.Lcd * np.sin(theta_c)
+            # eq 10
+            d = -self.Lde * np.sin(theta_e)
+            # eq 11
+            e = self.Lfg * np.sin(np.pi - theta_f + self.FGO)
+            # eq 12
+            f = self.Lgi * np.sin(theta_i)
+            # eq 13
+            Lw = self.Lag * np.cos(self.theta_g) + a
+            # force applied to lift arm cylinders
+            Fc = self.n * (self.Ab * self.Pb - self.Ar * self.Pr)  
+            W = Fc*f / (Lw - (a*c*e/b*d))
+            return W / 9.81
+        
+        except :
+            return None
         
 
-    def load_estimate_callback(self, request, response):
-        self.get_logger().info('Load estimation triggered.')
+    async def load_estimate_callback(self, request, response):
+        self.get_logger().info('Load estimation triggered. Wait 0.5sec to estimate load')
+        self.r_history.clear()
+        self.b_history.clear()
+        await asyncio.sleep(0.5)
         try:
             estimated_mass = self.load_estimate()
             if estimated_mass is not None:
-                self.get_logger().info(f'Estimated load mass: {estimated_mass:.2f} kg')
                 response.success = True
                 response.message = f'Estimated load mass: {estimated_mass:.2f} kg'
             else:
-                self.get_logger().error('Load estimation failed. Check sensor data or calculation error.')
                 response.success = False
                 response.message = 'Load estimation failed. Not all sensor data is available or calculation error.'
         except Exception as e:
-            self.get_logger().error(f'Exception during load estimation: {e}')
             response.success = False
             response.message = f'Exception during load estimation: {str(e)}'
         return response

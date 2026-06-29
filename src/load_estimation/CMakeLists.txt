@@ -29,7 +29,6 @@ ament_python_install_package(${PROJECT_NAME})
 install(PROGRAMS
   scripts/dummy_script.py
   scripts/load_est.py
-  scripts/sensor_filter.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

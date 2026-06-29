@@ -35,10 +35,10 @@ def main():
         [38, 42], [43, 47], [48, 52]
     ]
 
-    print("--- Average Values & Variance for Time Sections ---\n")
+    print("--- Median Values & Variance for Time Sections ---\n")
 
     # Data structure for storing section statistics for plotting
-    section_stats = {col: {'avg': [], 'var': []} for col in columns_to_analyze.keys()}
+    section_stats = {col: {'median': [], 'var': []} for col in columns_to_analyze.keys()}
     section_labels = []
 
     # Check if 'time' column exists in the dataframe
@@ -58,18 +58,18 @@ def main():
                 print("  - No data in this time range.\n")
                 # Append NaN to keep data aligned for plotting if a section is empty
                 for col in columns_to_analyze.keys():
-                    section_stats[col]['avg'].append(np.nan)
+                    section_stats[col]['median'].append(np.nan)
                     section_stats[col]['var'].append(np.nan)
                 continue
 
             # Calculate and print the mean for each column of interest
             for col, name in columns_to_analyze.items():
                 if col in section_df.columns:
-                    avg_val = section_df[col].mean()
+                    median_val = section_df[col].median()
                     var_val = section_df[col].var()
-                    print(f"  - Average {name}: {avg_val:.4f}")
+                    print(f"  - Median {name}: {median_val:.4f}")
                     print(f"  - Variance {name}: {var_val:.4f}")
-                    section_stats[col]['avg'].append(avg_val)
+                    section_stats[col]['median'].append(median_val)
                     section_stats[col]['var'].append(var_val)
             print("")  # Newline for readability
 
@@ -87,20 +87,20 @@ def main():
     x = np.arange(len(section_labels))
     width = 0.2  # the width of the bars
 
-    # --- Subplot 1: Averages ---
+    # --- Subplot 1: Medians ---
     ax1 = axes[0]
     # Use different colors for 'b' and 'r' sensors, and alpha for raw vs filtered
-    bars1 = ax1.bar(x - width*1.5, section_stats['raw_b']['avg'], width, label='Raw [b]', color='#1f77b4', alpha=0.7)
-    bars2 = ax1.bar(x - width*0.5, section_stats['median_b']['avg'], width, label='Median [b]', color='#1f77b4')
-    bars3 = ax1.bar(x + width*0.5, section_stats['raw_r']['avg'], width, label='Raw [r]', color='#ff7f0e', alpha=0.7)
-    bars4 = ax1.bar(x + width*1.5, section_stats['median_r']['avg'], width, label='Median [r]', color='#ff7f0e')
+    bars1 = ax1.bar(x - width*1.5, section_stats['raw_b']['median'], width, label='Raw [b]', color='#1f77b4', alpha=0.7)
+    bars2 = ax1.bar(x - width*0.5, section_stats['median_b']['median'], width, label='Median [b]', color='#1f77b4')
+    bars3 = ax1.bar(x + width*0.5, section_stats['raw_r']['median'], width, label='Raw [r]', color='#ff7f0e', alpha=0.7)
+    bars4 = ax1.bar(x + width*1.5, section_stats['median_r']['median'], width, label='Median [r]', color='#ff7f0e')
 
-    ax1.set_ylabel('Average Pressure')
-    ax1.set_title('Comparison of Average Pressure Values per Section')
+    ax1.set_ylabel('Median Pressure')
+    ax1.set_title('Comparison of Median Pressure Values per Section')
     ax1.legend()
     ax1.grid(True, axis='y', linestyle='--', alpha=0.7)
 
-    # Add data labels on top of the bars for averages
+    # Add data labels on top of the bars for medians
     for bars in [bars1, bars2, bars3, bars4]:
         for bar in bars:
             yval = bar.get_height()

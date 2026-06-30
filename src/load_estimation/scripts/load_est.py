@@ -4,10 +4,12 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float64MultiArray
 from std_srvs.srv import Trigger
-import asyncio
+from rclpy.task import Future 
+from rclpy.callback_groups import ReentrantCallbackGroup  
+from rclpy.executors import MultiThreadedExecutor         
 from collections import deque
 import numpy as np
-
+import time
 
 class LoadEstimation(Node):
     def __init__(self):
@@ -43,33 +45,41 @@ class LoadEstimation(Node):
         self.Ar = 0.014;    # rod cross-section area
 
         # measured
-        self.theta_g = None # AGO (deg)
-        self.theta_t = None # FEC (deg)
+        self.theta_g = None # AGO (rad)
+        self.theta_t = None # FEC (rad)
         self.Pb = None      # bottom cylinder pressure (Pa)
         self.Pr = None      # rod side pressure (Pa)
+
+        self.theta_g_offset = np.deg2rad(-39.26)
+        self.theta_t_offset = np.deg2rad(74.88)
 
         # filter
         self.window_size = 50
         self.r_history = deque(maxlen=self.window_size)
         self.b_history = deque(maxlen=self.window_size)
 
+        self.cb_group = ReentrantCallbackGroup()
+
         self.create_service(Trigger, 
             "/vehicle/load_estimate", 
-            self.load_estimate_callback
+            self.load_estimate_callback,
+            callback_group=self.cb_group
         )
 
         self.create_subscription(
             Float64MultiArray, 
             "/vehicle/loader_joint_pressures", 
             self.pressure_callback, 
-            10
+            10,
+            callback_group=self.cb_group
         )
 
         self.create_subscription(
             Float64MultiArray, 
             "/vehicle/loader_joint_angles", 
             self.angle_callback,
-            10
+            10,
+            callback_group=self.cb_group
         )
 
     def pressure_callback(self, msg:Float64MultiArray):
@@ -87,16 +97,17 @@ class LoadEstimation(Node):
         median_r = np.median(self.r_history)
 
         # offset cal
-        offset_b = 3874 + 2727*median_b + -912*median_b**2
-        offset_r = 36.5*median_r  + 394
+        if self.theta_g is not None:
+            offset_b = 3874 + 2727*self.theta_g + -912*self.theta_g**2
+            offset_r = 36.5*self.theta_g  + 394
 
-        # sensor_val2Pa, pure_load pressure
-        self.Pb = (median_b - offset_b) * (40*10**6)/32767
-        self.Pr = (median_r - offset_r) * (40*10**6)/32767
+            # sensor_val2Pa, pure_load pressure
+            self.Pb = (median_b - offset_b) * (40*10**6)/32767
+            self.Pr = (median_r - offset_r) * (40*10**6)/32767
 
     def angle_callback(self, msg:Float64MultiArray):
-        self.theta_g = msg.data[0]
-        self.theta_t = msg.data[1]
+        self.theta_g = msg.data[0] + self.theta_g_offset
+        self.theta_t = msg.data[1] + self.theta_t_offset
 
     def load_estimate(self):
         if self.theta_g is None or self.theta_t is None or self.Pb is None or self.Pr is None:
@@ -174,37 +185,58 @@ class LoadEstimation(Node):
             # force applied to lift arm cylinders
             Fc = self.n * (self.Ab * self.Pb - self.Ar * self.Pr)  
             W = Fc*f / (Lw - (a*c*e/b*d))
-            return W / 9.81
+            return (Fc, W/9.81)
         
         except :
             return None
         
 
-    async def load_estimate_callback(self, request, response):
-        self.get_logger().info('Load estimation triggered. Wait 0.5sec to estimate load')
+    def load_estimate_callback(self, request, response):
+        self.get_logger().info('Load estimation triggered.')
+        
         self.r_history.clear()
         self.b_history.clear()
-        await asyncio.sleep(0.5)
+        self.Pb = None
+        self.Pr = None
+    
+        timeout = 2.0 
+        start_time = time.time()
+        
+        while self.Pb is None or self.Pr is None:
+            if time.time() - start_time > timeout:
+                self.get_logger().warn('Timeout waiting for sensor data to fill the buffer.')
+                response.success = False
+                response.message = 'Load estimation failed. Timeout waiting for sensor data to fill the buffer.'
+                return response
+        
+            time.sleep(1)
+            
         try:
-            estimated_mass = self.load_estimate()
-            if estimated_mass is not None:
+            output = self.load_estimate()
+            if output is not None:
                 response.success = True
-                response.message = f'Estimated load mass: {estimated_mass:.2f} kg'
+                response.message = f'force: {output[0]:.2f} N, load: {output[1]:.2f} kg'
+                self.get_logger().info(f'force: {output[0]:.2f} N, load: {output[1]:.2f} kg')
             else:
                 response.success = False
-                response.message = 'Load estimation failed. Not all sensor data is available or calculation error.'
+                response.message = 'Load estimation failed. Calculation error.'
         except Exception as e:
             response.success = False
             response.message = f'Exception during load estimation: {str(e)}'
+            
         return response
-
 
 def main(args=None):
     rclpy.init(args=args)
     node = LoadEstimation()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    executor = MultiThreadedExecutor()
+    try:
+        rclpy.spin(node, executor=executor)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__=='__main__':
     main()

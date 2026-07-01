@@ -26,9 +26,9 @@ def median_filter_series(series, window_size):
 def main():
     # --- File Paths ---
     # Input CSV file path
-    input_csv_path = '/home/iwa/wheel_loader_ws/results/csv/multi_weigh_pose1.csv'
+    input_csv_path = '/home/iwa/wheel_loader_ws/results/csv/final_offset.csv'
     # Output CSV file path
-    output_csv_path = '/home/iwa/wheel_loader_ws/results/csv/multi_weigh_pose1_filtered.csv'
+    output_csv_path = '/home/iwa/wheel_loader_ws/results/csv/final_offset_filtered.csv'
 
     # --- Parameters ---
     alpha = 0.1  # Smoothing factor for low-pass filter

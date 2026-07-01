@@ -9,7 +9,7 @@ def main():
     Calculates and prints statistical metrics for pressure data from a CSV file.
     """
     # --- File Path ---
-    csv_file_path = '/home/iwa/wheel_loader_ws/results/csv/multi_weigh_pose2_filtered.csv'
+    csv_file_path = '/home/iwa/wheel_loader_ws/results/csv/final_offset_filtered.csv'
 
     # --- Load Data ---
     try:
@@ -29,8 +29,9 @@ def main():
     # --- Define Time Sections for Averaging ---
     # Each sub-list represents a [start_time, end_time] pair for a section.
     time_sections = [
-        [0, 1], [11, 12], [22, 23],
-        [34, 35], [52, 53], [67, 68]
+        [0, 10], [25, 30], [70, 71],
+        [105, 106], [141, 142], [174, 175],
+        [212,213],[252,253],[290,291]
     ]
 
     print("--- Median Values & Variance for Time Sections ---\n")

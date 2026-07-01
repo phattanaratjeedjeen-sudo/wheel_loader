@@ -28,7 +28,7 @@ class LoadEstimation(Node):
         self.Lab = 454.8/1000
         self.LgiX = -13.5*10/1000
         self.LgiY = -64*10/1000
-        self.Lgi = np.sqrt(self.LgiY**2 + self.LgiX**2)/1000
+        self.Lgi = np.sqrt(self.LgiY**2 + self.LgiX**2)
         self.Lgh = 1630/1000
 
         self.n = 2.0 
@@ -57,6 +57,10 @@ class LoadEstimation(Node):
         self.window_size = 50
         self.r_history = deque(maxlen=self.window_size)
         self.b_history = deque(maxlen=self.window_size)
+
+        # tuned
+        self.LloadG = 0.5
+        self.HloadG = 0.0
 
         self.cb_group = ReentrantCallbackGroup()
 
@@ -98,8 +102,8 @@ class LoadEstimation(Node):
 
         # offset cal
         if self.theta_g is not None:
-            offset_b = 3874 + 2727*self.theta_g + -912*self.theta_g**2
-            offset_r = 36.5*self.theta_g  + 394
+            offset_b = 4225 + 1979*self.theta_g + -534*self.theta_g**2
+            offset_r = 48.1*self.theta_g  + 404
 
             # sensor_val2Pa, pure_load pressure
             self.Pb = (median_b - offset_b) * (40*10**6)/32767
@@ -169,7 +173,7 @@ class LoadEstimation(Node):
             Hbmcyl = self.IGO - GIH
             theta_i = np.pi - (self.IGO + Hbmcyl)
 
-            a = 0
+            a = self.LloadG * np.cos(self.theta_g + theta_c + self.theta_d + theta_e - theta_b + 180 - self.HloadG)
             # eq 8
             b = -self.Lab * np.sin(theta_b)
             # eq 9 

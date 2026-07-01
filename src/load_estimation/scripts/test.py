@@ -24,7 +24,7 @@ class LoadEstimation(Node):
         self.Lab = 454.8/1000
         self.LgiX = -13.5*10/1000
         self.LgiY = -64*10/1000
-        self.Lgi = np.sqrt(self.LgiY**2 + self.LgiX**2)/1000
+        self.Lgi = np.sqrt(self.LgiY**2 + self.LgiX**2)
         self.Lgh = 1630/1000
 
         self.n = 2.0 
@@ -38,13 +38,19 @@ class LoadEstimation(Node):
 
         # area (m^2)
         self.Ab = 0.02;     # bottom cross-section area
-        self.Ar = 0.014;    # rod cross-section area
+        self.Ar = 0.014;    # piston cross-section area
 
         # measured
         self.theta_g = None # AGO (rad)
         self.theta_t = None # FEC (rad)
         self.Pb = None      # bottom cylinder pressure (Pa)
         self.Pr = None      # rod side pressure (Pa)
+        self.raw_Pb = None
+        self.raw_Pr = None
+        self.offset_Pb = None
+        self.offset_Pr = 380.0
+        self.median_Pb = None
+        self.median_Pr = None
 
         self.theta_g_offset = np.deg2rad(-39.26)
         self.theta_t_offset = np.deg2rad(74.88)
@@ -53,6 +59,10 @@ class LoadEstimation(Node):
         self.window_size = 50
         self.r_history = deque(maxlen=self.window_size)
         self.b_history = deque(maxlen=self.window_size)
+
+        # tuned
+        self.LloadG = 0.0
+        self.HloadG = 0.0
 
         hz = 100
         self.create_timer(1/hz, self.load_estimate)
@@ -78,27 +88,26 @@ class LoadEstimation(Node):
         )
 
     def pressure_callback(self, msg:Float64MultiArray):
-        raw_b = msg.data[0]
-        raw_r = msg.data[1]
+        self.raw_b = msg.data[0]
+        self.raw_r = msg.data[1]
 
         # median filter
-        self.b_history.append(raw_b)
-        self.r_history.append(raw_r)
+        self.b_history.append(self.raw_b)
+        self.r_history.append(self.raw_r)
 
         if len(self.b_history) < self.window_size:
             return
 
-        median_b = np.median(self.b_history)
-        median_r = np.median(self.r_history)
+        self.median_Pb = np.median(self.b_history)
+        self.median_Pr = np.median(self.r_history)
 
         # offset cal
         if self.theta_g is not None:
-            offset_b = 3874 + 2727*self.theta_g + -912*self.theta_g**2
-            offset_r = 36.5*self.theta_g  + 394
+            self.offset_Pb = 4225 + 1979*(self.theta_g - self.theta_g_offset) + -534*(self.theta_g - self.theta_g_offset)**2
 
             # sensor_val2Pa, pure_load pressure
-            self.Pb = (median_b - offset_b) * (40*10**6)/32767
-            self.Pr = (median_r - offset_r) * (40*10**6)/32767
+            self.Pb = np.maximum(0.0,(self.median_Pb - self.offset_Pb) * (40*10**6)/32767)
+            self.Pr = np.maximum(0.0,(self.median_Pr - self.offset_Pr) * (40*10**6)/32767)
 
     def angle_callback(self, msg:Float64MultiArray):
         self.theta_g = msg.data[0] + self.theta_g_offset
@@ -162,7 +171,7 @@ class LoadEstimation(Node):
         Hbmcyl = self.IGO - GIH
         theta_i = np.pi - (self.IGO + Hbmcyl)
 
-        a = 0.0
+        a = self.LloadG * np.cos(self.theta_g + theta_c + self.theta_d + theta_e - theta_b + 180 - self.HloadG)
         # eq 8
         b = -self.Lab * np.sin(theta_b)
         # eq 9 
@@ -177,7 +186,7 @@ class LoadEstimation(Node):
         Lw = self.Lag * np.cos(self.theta_g) + a
         # force applied to lift arm cylinders
         Fc = self.n * (self.Ab * self.Pb - self.Ar * self.Pr)  
-        W = Fc*f / (Lw - (a*c*e/b*d))
+        W = (Fc*f / (Lw - (a*c*e/b*d)))/9.81
 
         msg = Debug()
         msg.a = a
@@ -188,7 +197,17 @@ class LoadEstimation(Node):
         msg.f = f
         msg.lw = Lw
         msg.fc = Fc
-        msg.w = W
+        msg.w = W 
+        msg.raw_pb = self.raw_b
+        msg.raw_pr = self.raw_r  
+        msg.offset_pb = self.offset_Pb
+        msg.offset_pr = self.offset_Pr
+        msg.median_pb = self.median_Pb
+        msg.median_pr = self.median_Pr
+        msg.pb = self.Pb
+        msg.pr = self.Pr
+        msg.theta_g = self.theta_g
+        msg.theta_t = self.theta_t
         self.publisher.publish(msg)
 
 def main(args=None):

@@ -1,28 +1,35 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <root>
- <tabbed_widget parent="main_window" name="Main Window">
-  <Tab containers="1" tab_name="tab1">
+ <tabbed_widget name="Main Window" parent="main_window">
+  <Tab tab_name="tab1" containers="1">
    <Container>
-    <DockSplitter orientation="-" sizes="0.332953;0.334094;0.332953" count="3">
+    <DockSplitter count="4" sizes="0.25;0.25;0.25;0.25" orientation="-">
      <DockArea name="...">
-      <plot flip_x="false" mode="TimeSeries" flip_y="false" line_width="1.0">
-       <range left="0.000000" top="359.957487" right="134.456193" bottom="-196.186593"/>
+      <plot flip_x="false" mode="TimeSeries" line_width="1.0" flip_y="false">
+       <range bottom="-242.595621" top="1528.794683" left="0.000000" right="117.869695"/>
        <limitY/>
-       <curve name="/debug_geometry/w" color="#1f77b4"/>
+       <curve name="/debug/w" color="#1ac938"/>
       </plot>
      </DockArea>
      <DockArea name="...">
-      <plot flip_x="false" mode="TimeSeries" flip_y="false" line_width="1.0">
-       <range left="0.000000" top="0.264447" right="134.456193" bottom="-0.676165"/>
+      <plot flip_x="false" mode="TimeSeries" line_width="1.0" flip_y="false">
+       <range bottom="-39.610842" top="-7.802743" left="0.000000" right="117.869695"/>
        <limitY/>
-       <curve name="/debug_geometry/theta_g" color="#d62728"/>
+       <curve name="/debug/theta_g" color="#ff7f0e"/>
       </plot>
      </DockArea>
      <DockArea name="...">
-      <plot flip_x="false" mode="TimeSeries" flip_y="false" line_width="1.0">
-       <range left="0.000000" top="0.123042" right="134.456193" bottom="-0.158632"/>
+      <plot flip_x="false" mode="TimeSeries" line_width="1.0" flip_y="false">
+       <range bottom="-3.940726" top="4.865147" left="0.000000" right="117.869695"/>
        <limitY/>
-       <curve name="omega_g" color="#1ac938"/>
+       <curve name="vel_g" color="#f14cc1"/>
+      </plot>
+     </DockArea>
+     <DockArea name="...">
+      <plot flip_x="false" mode="TimeSeries" line_width="1.0" flip_y="false">
+       <range bottom="-384.914468" top="400.708835" left="0.000000" right="117.869695"/>
+       <limitY/>
+       <curve name="acc_g" color="#9467bd"/>
       </plot>
      </DockArea>
     </DockSplitter>
@@ -35,7 +42,7 @@
  <!-- - - - - - - - - - - - - - - -->
  <Plugins>
   <plugin ID="DataLoad CSV">
-   <parameters delimiter="0" time_axis=""/>
+   <parameters delimiter="0" time_axis="__time"/>
   </plugin>
   <plugin ID="DataLoad MCAP"/>
   <plugin ID="DataLoad ROS2 bags">
@@ -53,7 +60,7 @@
    <max_array_size value="100"/>
    <boolean_strings_to_number value="true"/>
    <remove_suffix_from_strings value="true"/>
-   <selected_topics value="/debug_geometry"/>
+   <selected_topics value="/debug"/>
   </plugin>
   <plugin ID="UDP Server"/>
   <plugin ID="WebSocket Server"/>
@@ -69,25 +76,74 @@
  </Plugins>
  <!-- - - - - - - - - - - - - - - -->
  <previouslyLoaded_Datafiles/>
+ <previouslyLoaded_Streamer name="ROS2 Topic Subscriber"/>
  <!-- - - - - - - - - - - - - - - -->
  <customMathEquations>
-  <snippet name="omega_g">
-   <global>prevX = 0
-prevY = 0
-is_first = true</global>
-   <function>if (is_first) then
+  <snippet name="acc_g">
+   <global>firstX = 0
+firstY = 0
+is_first = true
+secondX = 0
+secondY = 0
+is_second = false</global>
+   <function>-- Wait for initial values
+if (is_first) then
   is_first = false
-  prevX = time
-  prevY = value
+  is_second = true
+  firstX = time
+  firstY = value
 end
 
-dx = time - prevX
-dy = value - prevY
-prevX = time
-prevY = value
+if (is_second) then
+  is_second = false
+  secondX = time
+  secondY = value
+end
+
+-- Central derivative: dy/dx ~= f(x+delta_x)-f(x-delta_x)/(2*delta_x)
+dx = time - firstX
+dy = value - firstY
+-- Increment
+firstX = secondX
+firstY = secondY
+secondX = time
+secondY = value
 
 return dy/dx</function>
-   <linked_source>/debug_geometry/theta_g</linked_source>
+   <linked_source>vel_g</linked_source>
+  </snippet>
+  <snippet name="vel_g">
+   <global>firstX = 0
+firstY = 0
+is_first = true
+secondX = 0
+secondY = 0
+is_second = false</global>
+   <function>-- Wait for initial values
+if (is_first) then
+  is_first = false
+  is_second = true
+  firstX = time
+  firstY = value
+end
+
+if (is_second) then
+  is_second = false
+  secondX = time
+  secondY = value
+end
+
+-- Central derivative: dy/dx ~= f(x+delta_x)-f(x-delta_x)/(2*delta_x)
+dx = time - firstX
+dy = value - firstY
+-- Increment
+firstX = secondX
+firstY = secondY
+secondX = time
+secondY = value
+
+return dy/dx</function>
+   <linked_source>/debug/theta_g</linked_source>
   </snippet>
  </customMathEquations>
  <snippets/>

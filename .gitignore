@@ -1,12 +1,15 @@
-note/
+note
+results
+material
+matlab
 
-build/
-install/
-log/
+build
+install
+log
 
-matlab/slprj
-docker_launch.md
+src/load_estimation
+src/load_estimation/config
+src/load_estimation/scripts/others
+src/load_estimation/launch
 
-# results/bag
-# results/csv
-# src/load_estimation/scripts/others
+src/load_estimation_interfaces

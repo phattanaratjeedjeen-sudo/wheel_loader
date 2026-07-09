@@ -27,10 +27,7 @@ ament_python_install_package(${PROJECT_NAME})
 
 # Install Python executables
 install(PROGRAMS
-  scripts/dummy_script.py
-  scripts/test5.py
-  scripts/test4.py
-  scripts/load_est.py
+  scripts/load_estimate.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -51,8 +48,6 @@ install(TARGETS
 ################ INSTALL LAUNCH, ETC #################
 install(DIRECTORY
   # add directories here
-  launch
-  config
   DESTINATION share/${PROJECT_NAME})
 
 ament_package()

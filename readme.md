@@ -1,7 +1,7 @@
 #  Static Load Estimation for Wheel Loader
 ## System architecture
 
-<img width="847" height="484" alt="Screenshot from 2026-07-09 23-24-00" src="https://github.com/user-attachments/assets/6812c6cc-a254-4a12-8021-539b674c7c5d" />
+<img width="847" height="484" alt="Screenshot from 2026-07-09 23-30-46" src="https://github.com/user-attachments/assets/a58aecf4-6259-45f8-b908-5bf50e8e842b" />
 
 ## Use this package
 ```

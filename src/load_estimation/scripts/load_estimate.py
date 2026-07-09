@@ -56,6 +56,9 @@ class LoadEstimationNode(Node):
             10
         )
 
+        self.get_logger().info('Load estimater initialized.')
+        self.get_logger().info('Usage: Use ros2 service call /vehicle/load_estimate std_srvs/srv/Trigger')
+
 
     def angle_callback(self, msg:Float64MultiArray):
         self.theta_g = msg.data[0] + self.theta_g_offset

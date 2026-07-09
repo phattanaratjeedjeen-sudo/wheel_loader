@@ -41,7 +41,7 @@ class SimpleNode(Node):
         self.k = 3640
         self.beta = 0.225
 
-        hz = 100
+        hz = 10
         self.create_timer(1/hz, self.load_estimate)
 
         self.create_subscription(

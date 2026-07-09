@@ -60,7 +60,7 @@ def generate_launch_description():
 
     load_estimation_node = Node(
         package='load_estimation',
-        executable='test4.py',
+        executable='test5.py',
         # parameters=[{'use_offset': LaunchConfiguration('use_offset')}]
     )
     

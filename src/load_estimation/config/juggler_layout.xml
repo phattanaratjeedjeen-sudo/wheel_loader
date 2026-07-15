@@ -1,35 +1,35 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <root>
- <tabbed_widget name="Main Window" parent="main_window">
+ <tabbed_widget parent="main_window" name="Main Window">
   <Tab tab_name="tab1" containers="1">
    <Container>
-    <DockSplitter count="4" sizes="0.25;0.25;0.25;0.25" orientation="-">
+    <DockSplitter sizes="0.25;0.25;0.25;0.25" count="4" orientation="-">
      <DockArea name="...">
-      <plot flip_x="false" mode="TimeSeries" line_width="1.0" flip_y="false">
-       <range bottom="-242.595621" top="1528.794683" left="0.000000" right="117.869695"/>
+      <plot line_width="1.0" flip_x="false" flip_y="false" mode="TimeSeries">
+       <range bottom="7966.125000" top="8170.875000" left="0.000000" right="117.900810"/>
        <limitY/>
-       <curve name="/debug/w" color="#1ac938"/>
+       <curve color="#1f77b4" name="/debug/pb"/>
       </plot>
      </DockArea>
      <DockArea name="...">
-      <plot flip_x="false" mode="TimeSeries" line_width="1.0" flip_y="false">
-       <range bottom="-39.610842" top="-7.802743" left="0.000000" right="117.869695"/>
+      <plot line_width="1.0" flip_x="false" flip_y="false" mode="TimeSeries">
+       <range bottom="0.292842" top="0.293043" left="0.000000" right="117.900810"/>
        <limitY/>
-       <curve name="/debug/theta_g" color="#ff7f0e"/>
+       <curve color="#d62728" name="/debug/theta_g"/>
       </plot>
      </DockArea>
      <DockArea name="...">
-      <plot flip_x="false" mode="TimeSeries" line_width="1.0" flip_y="false">
-       <range bottom="-3.940726" top="4.865147" left="0.000000" right="117.869695"/>
+      <plot line_width="1.0" flip_x="false" flip_y="false" mode="TimeSeries">
+       <range bottom="-0.005072" top="0.005023" left="0.000000" right="117.900810"/>
        <limitY/>
-       <curve name="vel_g" color="#f14cc1"/>
+       <curve color="#1ac938" name="vel_g"/>
       </plot>
      </DockArea>
      <DockArea name="...">
-      <plot flip_x="false" mode="TimeSeries" line_width="1.0" flip_y="false">
-       <range bottom="-384.914468" top="400.708835" left="0.000000" right="117.869695"/>
+      <plot line_width="1.0" flip_x="false" flip_y="false" mode="TimeSeries">
+       <range bottom="-0.490378" top="0.387605" left="0.000000" right="117.900810"/>
        <limitY/>
-       <curve name="acc_g" color="#9467bd"/>
+       <curve color="#ff7f0e" name="acc_g"/>
       </plot>
      </DockArea>
     </DockSplitter>
@@ -42,7 +42,7 @@
  <!-- - - - - - - - - - - - - - - -->
  <Plugins>
   <plugin ID="DataLoad CSV">
-   <parameters delimiter="0" time_axis="__time"/>
+   <parameters time_axis="" delimiter="0"/>
   </plugin>
   <plugin ID="DataLoad MCAP"/>
   <plugin ID="DataLoad ROS2 bags">

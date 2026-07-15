@@ -16,8 +16,8 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 ################ FIND DEPENDENCIES  #################
-find_package(ament_cmake REQUIRED)		# cpp (optional)
-find_package(rclcpp REQUIRED)			    # cpp (optional)
+find_package(ament_cmake REQUIRED)		        # cpp (optional)
+find_package(rclcpp REQUIRED)			            # cpp (optional)
 find_package(ament_cmake_python REQUIRED)   	# python (optional)
 find_package(rclpy REQUIRED)                	# python (optional)
 ######################################################
@@ -27,7 +27,7 @@ ament_python_install_package(${PROJECT_NAME})
 
 # Install Python executables
 install(PROGRAMS
-  scripts/load_estimate.py
+  scripts/raw_data.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

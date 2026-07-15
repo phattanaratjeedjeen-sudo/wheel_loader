@@ -6,6 +6,7 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
+
 def find_and_play_bag(context, *args, **kwargs):
     """Finds the latest rosbag in a directory and creates an ExecuteProcess action to play it."""
     bags_dir = LaunchConfiguration('bags_dir').perform(context)
@@ -25,7 +26,6 @@ def find_and_play_bag(context, *args, **kwargs):
 
 
 def generate_launch_description():
-    # --- Declare Launch Arguments ---
     pkg_share = get_package_share_directory('load_estimation')
 
     juggler_layout_arg = DeclareLaunchArgument(
@@ -38,17 +38,6 @@ def generate_launch_description():
         default_value='empty',
     )
 
-    # use_offset_arg = DeclareLaunchArgument(
-    #     'use_offset',
-    #     default_value='False'
-    # )
-
-    # use_filter_arg = DeclareLaunchArgument(
-    #     'use_filter',
-    #     default_value='True',
-    # )
-
-    # --- Define Actions ---
     plotjuggler_node = Node(
         package='plotjuggler',
         executable='plotjuggler',
@@ -60,16 +49,13 @@ def generate_launch_description():
 
     load_estimation_node = Node(
         package='load_estimation',
-        executable='test5.py',
-        # parameters=[{'use_offset': LaunchConfiguration('use_offset')}]
+        executable='raw_data.py',
     )
     
-    # --- Create and Return the Launch Description ---
+
     return LaunchDescription([
         juggler_layout_arg,
         bags_dir_arg,
-        # use_offset_arg,
-        # use_filter_arg,
         plotjuggler_node,
         find_and_play_bag_action,
         load_estimation_node,

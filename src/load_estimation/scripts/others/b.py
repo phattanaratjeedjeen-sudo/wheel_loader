@@ -15,10 +15,10 @@ Lgh = 0.163
 Lgi = np.sqrt(0.135**2 + 0.64**2)
 Lag = 3.9294
 IGO = np.pi - np.arctan2(0.64, 0.135)
-toPa = 40 * 10**6 / (2**15 / 2 - 1)
 
 # Cylinder areas
-Ab = 0.02  # m^2, bottom cross-section area
+Ab = 0.020  # m^2, bottom cross-section area
+Ar = 0.014  # m^2, piston cross-section area
 
 # --- Thresholds for Static Condition ---
 ACC_THRESHOLD = 0.001  # rad/s^2
@@ -40,65 +40,78 @@ class InteractiveTuner:
     def __init__(self, df, current_filename):
         self.df = df.copy()
         self.current_filename = current_filename
-        self.use_compensation = True
+        self.sensor_scale_factor = 2.455
+        self.toPa_base = 40 * 10**6 / (2**15 - 1)
+        self.use_compensation = False
         self.k1 = 1640.0
         self.k2 = 0.225
-        self.k3 = 0.0
-        self.k4 = 0.0
-        self.use_bucket_compensation = False
-        self.Ar = 0.014  # m^2, piston cross-section area
         self.use_median_filter = True
         self.use_ema_filter = True
         self.ema_alpha = 0.001
         self.median_window = 100
         self.slope_time_interval = 0.1
-        self.initial_search_time = 0.0
         self.slope_threshold = 1.0
-        self.settling_time = None
-        self.settling_duration = None
-        self.use_auto_initial_time = True
         self.use_slope_filter = True
         self.slope_ema_alpha = 0.001
-        self.ts_param = 80.92
+        self.ts_param = 65.0
+        self.settling_duration_req = 10.0
         self.duration_param = 3.0
 
-        # --- Parse filename for target_theta_g ---
+        # Multi-target attributes
+        self.target_theta_g_list = []
+        self.analysis_targets = []  # List of dicts: {'target_g': g, 'initial_search_time': t}
+        self.settling_results = []  # List of dicts for plotting results
+        self.final_pressure_results = []  # List of dicts for final pressure results
+
         match = re.search(r'(\d+\.\d+)', self.current_filename)
         default_target = 0.3
         if match:
             try:
-                self.target_theta_g = float(match.group(1))
-                print(f"Auto-set target_theta_g from filename to: {self.target_theta_g}")
+                self.target_theta_g_list = [float(match.group(1))]
+                print(f"Auto-set target_theta_g from filename to: {self.target_theta_g_list}")
             except (ValueError, IndexError):
-                self.target_theta_g = default_target
-                print(f"Could not parse float from filename. Defaulting target_theta_g to: {default_target}")
+                self.target_theta_g_list = [default_target]
+                print(f"Could not parse float from filename. Defaulting target_theta_g to: {[default_target]}")
         else:
-            self.target_theta_g = default_target
-            print(f"Filename does not contain a float. Defaulting target_theta_g to: {default_target}")
+            self.target_theta_g_list = [default_target]
+            print(f"Filename does not contain a float. Defaulting target_theta_g to: {[default_target]}")
 
-        self.theta_g_threshold = 0.05
+        self.theta_g_threshold = 0.05 # used for auto-detect
         self.vel_g_threshold_auto = VEL_THRESHOLD
         self.acc_g_threshold_auto = ACC_THRESHOLD
 
         # --- Create Figure and Axes for plots---
         self.fig, (self.ax1, self.ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
-        self.fig.subplots_adjust(left=0.05, bottom=0.05, right=0.99, top=0.94, wspace=0.08, hspace=0.2)
+        self.fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.94, wspace=0.08, hspace=0.2)
 
-        # --- Create a new Figure for the time plot ---
-        self.time_fig, self.ax_time = plt.subplots(1, 1, num='Figure 2: Load vs Time', figsize=(12, 6))
-        self.time_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.99, top=0.94, wspace=0.08, hspace=0.2)
+        # --- Create a new Figure for the time plot with an extra subplot for 'a' ---
+        self.time_fig, (self.ax_time, self.ax_a) = plt.subplots(2, 1, num='Figure 2: Load & Geometry vs Time', figsize=(12, 8), sharex=True)
+        self.time_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.94, wspace=0.08, hspace=0.2)
+        self.ax_a2 = self.ax_a.twinx()
 
         # --- Create a new Figure for pressure analysis ---
-        self.pressure_fig = plt.figure(num='Figure 3: Pressure Analysis', figsize=(12, 8))
+        self.pressure_fig = plt.figure(num='Figure 3: Pressure Analysis (pb)', figsize=(12, 8))
         gs = self.pressure_fig.add_gridspec(2, 2)
         self.ax_pressure_pb = self.pressure_fig.add_subplot(gs[0, 0])
         self.ax_theta_g_t = self.pressure_fig.add_subplot(gs[0, 1], sharex=self.ax_pressure_pb)
         self.ax_slope_pb = self.pressure_fig.add_subplot(gs[1, :], sharex=self.ax_pressure_pb)
-        self.pressure_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.99, top=0.94, wspace=0.08, hspace=0.2)
+        self.pressure_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.94, wspace=0.08, hspace=0.2)
 
         # --- Create a new Figure for final pressure analysis ---
-        self.final_pressure_fig, self.ax_final_pressure = plt.subplots(num='Figure 4: Final Pressure', figsize=(12, 8))
-        self.final_pressure_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.99, top=0.94, wspace=0.08, hspace=0.2)
+        self.final_pressure_fig, self.ax_final_pressure = plt.subplots(num='Figure 4: Final Pressure (pb)', figsize=(12, 8))
+        self.final_pressure_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.94, wspace=0.08, hspace=0.2)
+
+        # --- Create a new Figure for pr pressure analysis ---
+        self.pr_pressure_fig = plt.figure(num='Figure 5: Pressure Analysis (pr)', figsize=(12, 8))
+        gs_pr = self.pr_pressure_fig.add_gridspec(2, 2)
+        self.ax_pressure_pr = self.pr_pressure_fig.add_subplot(gs_pr[0, 0])
+        self.ax_theta_g_t_pr = self.pr_pressure_fig.add_subplot(gs_pr[0, 1], sharex=self.ax_pressure_pr)
+        self.ax_slope_pr = self.pr_pressure_fig.add_subplot(gs_pr[1, :], sharex=self.ax_pressure_pr)
+        self.pr_pressure_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.94, wspace=0.08, hspace=0.2)
+
+        # --- Create a new Figure for pr final pressure analysis ---
+        self.pr_final_pressure_fig, self.ax_pr_final_pressure = plt.subplots(num='Figure 6: Final Pressure (pr)', figsize=(12, 8))
+        self.pr_final_pressure_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.94, wspace=0.08, hspace=0.2)
 
 
         # --- Create a separate Figure for controls ---
@@ -140,7 +153,8 @@ class InteractiveTuner:
 
         # --- Section 1: File & View ---
         add_section_title('File & View Controls')
-        row_h = h_checkbox_triple
+        num_fig_checks = 6
+        row_h = h_checkbox * num_fig_checks + 0.01
         y_cursor -= row_h
         ax_select_btn = self.control_fig.add_axes([left_margin, y_cursor + row_h - h_widget, content_width * 0.4, h_widget])
         ax_fig_vis = self.control_fig.add_axes([left_margin + content_width * 0.4 + h_gap_widget, y_cursor, content_width * 0.5, row_h])
@@ -157,16 +171,17 @@ class InteractiveTuner:
         ax_ema_alpha = self.control_fig.add_axes([slider_x, y_cursor, slider_w, h_widget])
         y_cursor -= v_gap_widget
 
+        y_cursor -= h_widget
+        ax_sensor_scale = self.control_fig.add_axes([left_margin, y_cursor, content_width * 0.5, h_widget])
+        y_cursor -= v_gap_widget
+
         # --- Section 3: Load Model Compensation ---
         add_section_title('Load Model Compensation')
         y_cursor -= h_widget; ax_check_link = self.control_fig.add_axes([left_margin, y_cursor, content_width * prop_checkbox, h_widget]); ax_k1 = self.control_fig.add_axes([slider_x, y_cursor, slider_w, h_widget]); y_cursor -= v_gap_widget
         y_cursor -= h_widget; ax_k2 = self.control_fig.add_axes([slider_x, y_cursor, slider_w, h_widget]); y_cursor -= v_gap_widget
-        y_cursor -= h_widget; ax_check_bucket = self.control_fig.add_axes([left_margin, y_cursor, content_width * prop_checkbox, h_widget]); ax_k3 = self.control_fig.add_axes([slider_x, y_cursor, slider_w, h_widget]); y_cursor -= v_gap_widget
-        y_cursor -= h_widget; ax_k4 = self.control_fig.add_axes([slider_x, y_cursor, slider_w, h_widget]); y_cursor -= v_gap_widget
 
         # --- Section 4: Settling Time Analysis ---
         add_section_title('Settling Time Analysis')
-        y_cursor -= h_widget; ax_check_auto_time = self.control_fig.add_axes([left_margin, y_cursor, content_width, h_widget]); y_cursor -= v_gap_widget
         
         y_cursor -= h_widget
         textbox_x = left_margin + content_width * 0.1
@@ -181,11 +196,15 @@ class InteractiveTuner:
         y_cursor -= v_gap_widget
 
         y_cursor -= h_widget
+        ax_settling_dur_req = self.control_fig.add_axes([textbox_x, y_cursor, textbox_w, h_widget])
+        y_cursor -= v_gap_widget
+
+
+        y_cursor -= h_widget
         ax_check_slope_filter = self.control_fig.add_axes([left_margin, y_cursor, content_width * prop_checkbox, h_widget])
         ax_slope_ema_alpha = self.control_fig.add_axes([slider_x, y_cursor, slider_w, h_widget])
         y_cursor -= v_gap_widget
 
-        y_cursor -= h_widget; ax_initial_time = self.control_fig.add_axes([slider_x, y_cursor, slider_w, h_widget]); y_cursor -= v_gap_widget
         y_cursor -= h_widget; ax_slope_interval = self.control_fig.add_axes([slider_x, y_cursor, slider_w, h_widget]); y_cursor -= v_gap_widget
         y_cursor -= h_widget; ax_slope_thresh = self.control_fig.add_axes([slider_x, y_cursor, slider_w, h_widget]); y_cursor -= v_gap_widget
 
@@ -201,30 +220,28 @@ class InteractiveTuner:
         # --- Instantiate Widgets (in section order) ---
         # Section 1: File & View
         self.btn_select_file = Button(ax_select_btn, 'Select CSV File')
-        self.check_figs = CheckButtons(ax_fig_vis, ['Load(θg)', 'Load(t)', 'Pressure(t)', 'Final Pressure'], actives=[False, False, False, False])
+        self.check_figs = CheckButtons(ax_fig_vis, ['Load(θg)', 'Load(t)', 'Pressure(t) pb', 'Final Pressure pb', 'Pressure(t) pr', 'Final Pressure pr'], actives=[False, False, False, False, False, False])
 
         # Section 2: Signal Filtering
         self.check_filters = CheckButtons(ax_filter_checks, ['Median', 'EMA'], actives=[self.use_median_filter, self.use_ema_filter])
         self.slider_median_win = Slider(ax_median_win, 'Median Win', 51, 201, valinit=self.median_window, valstep=10)
         self.slider_ema_alpha = Slider(ax_ema_alpha, 'EMA Alpha', 0.001, 0.01, valinit=self.ema_alpha, valstep=0.001)
+        self.text_sensor_scale = TextBox(ax_sensor_scale, 'Sensor Scale', initial=str(self.sensor_scale_factor))
 
         # Section 3: Load Model Compensation
         self.check_comp = CheckButtons(ax_check_link, ['Link Comp.'], [self.use_compensation])
         self.slider_k1 = Slider(ax_k1, 'k1', 0, 5000, valinit=self.k1)
         self.slider_k2 = Slider(ax_k2, 'k2', 0.0, 1.0, valinit=self.k2)
-        self.check_bucket_comp = CheckButtons(ax_check_bucket, ['Bucket Comp.'], [self.use_bucket_compensation])
-        self.slider_k3 = Slider(ax_k3, 'k3', 0, 5000, valinit=self.k3)
-        self.slider_k4 = Slider(ax_k4, 'k4', -1.0, 1.0, valinit=self.k4)
+
 
         # Section 4: Settling Time Analysis
-        self.check_auto_time = CheckButtons(ax_check_auto_time, ['Auto-detect Initial Time'], [self.use_auto_initial_time])
-        self.text_target_theta = TextBox(ax_target_theta, 'Target θg', initial=str(self.target_theta_g))
+        self.text_target_theta = TextBox(ax_target_theta, 'Target θg (csv)', initial=', '.join(map(str, self.target_theta_g_list)))
         self.text_theta_thresh = TextBox(ax_theta_thresh, 'θg Thresh', initial=str(self.theta_g_threshold))
         self.text_vel_thresh = TextBox(ax_vel_thresh_auto, 'Vel Thresh', initial=str(self.vel_g_threshold_auto))
         self.text_acc_thresh = TextBox(ax_acc_thresh_auto, 'Acc Thresh', initial=str(self.acc_g_threshold_auto))
+        self.text_settling_dur_req = TextBox(ax_settling_dur_req, 'Stable Dur (s)', initial=str(self.settling_duration_req))
         self.check_slope_filter = CheckButtons(ax_check_slope_filter, ['Filter Slope (EMA)'], [self.use_slope_filter])
         self.text_slope_ema_alpha = TextBox(ax_slope_ema_alpha, 'Slope EMA α', initial=str(self.slope_ema_alpha))
-        self.slider_initial_time = Slider(ax_initial_time, 'Initial Time (s)', 0.0, 100.0, valinit=self.initial_search_time, valstep=1.0)
         self.slider_slope_interval = Slider(ax_slope_interval, 'Slope Interval (s)', 0.1, 5.0, valinit=self.slope_time_interval, valstep=0.1)
         self.slider_slope_thresh = Slider(ax_slope_thresh, 'Slope Thresh', 0.0, 50.0, valinit=self.slope_threshold, valstep=1.0)
 
@@ -236,26 +253,23 @@ class InteractiveTuner:
         self.btn_select_file.on_clicked(self.open_file_dialog)
         self.slider_k1.on_changed(self.update_params)
         self.slider_k2.on_changed(self.update_params)
-        self.slider_k3.on_changed(self.update_params)
-        self.slider_k4.on_changed(self.update_params)
         self.check_comp.on_clicked(self.toggle_compensation)
-        self.check_bucket_comp.on_clicked(self.toggle_bucket_compensation)
         self.check_figs.on_clicked(self.toggle_figure_visibility)
         self.check_filters.on_clicked(self.toggle_filters)
         self.slider_ema_alpha.on_changed(self.update_filter_params)
         self.slider_median_win.on_changed(self.update_filter_params)
         self.slider_slope_interval.on_changed(self.update_slope_params)
-        self.slider_initial_time.on_changed(self.update_settling_params)
         self.slider_slope_thresh.on_changed(self.update_settling_params)
-        self.check_auto_time.on_clicked(self.toggle_auto_initial_time)
         self.text_target_theta.on_submit(self.update_auto_time_params)
         self.text_theta_thresh.on_submit(self.update_auto_time_params)
         self.text_vel_thresh.on_submit(self.update_auto_time_params)
         self.text_acc_thresh.on_submit(self.update_auto_time_params)
+        self.text_settling_dur_req.on_submit(self.update_settling_params)
         self.check_slope_filter.on_clicked(self.toggle_slope_filter)
         self.text_slope_ema_alpha.on_submit(self.update_slope_filter_params)
         self.text_ts_param.on_submit(self.update_final_pressure_params)
         self.text_duration_param.on_submit(self.update_final_pressure_params)
+        self.text_sensor_scale.on_submit(self.update_sensor_scale_factor)
 
         # --- Initial Calculation and Plot ---
         self.recalculate_and_plot()
@@ -275,16 +289,14 @@ class InteractiveTuner:
             link_compensate = self.k1 * np.cos(theta_g + self.k2) / np.cos(theta_g)
             w -= link_compensate
 
-        if self.use_bucket_compensation:
-            # Replicating logic from test5.py, using np.minimum for vectorization
-            # This term can be sensitive, handle potential warnings
-            with np.errstate(invalid='ignore'):  # tan can be inf
-                bucket_compensate = self.k3 * np.cos(theta_g + self.k4) / np.cos(theta_g)
-            w -= bucket_compensate
-
         return w
 
     def recalculate_and_plot(self):
+        # --- Define helper functions ---
+        # Exponential function for curve fitting
+        def exp_func(x, a, b, c):
+            return a * np.exp(b * x) + c
+
         # --- Perform Calculation ---
         theta_g = self.df[col_theta_g]
 
@@ -310,8 +322,10 @@ class InteractiveTuner:
         
         self.applied_filters_str = ' -> '.join(applied_filters) if applied_filters else 'None'
         # --- Calculate Force ---
-        # Calculate force from (filtered) pressure columns
-        Fc = 2 * (Ab * pb_filtered - self.Ar * pr_filtered) * toPa
+        # Calculate the final Pa conversion factor, which now includes the scale factor
+        toPa = self.toPa_base * self.sensor_scale_factor
+        Fc = 2 * (Ab * pb_filtered - Ar * pr_filtered) * toPa
+
         self.df[col_w_calculated] = self.calculate_mass(theta_g, Fc)
 
         # --- Calculate Slopes for plotting ---
@@ -328,43 +342,16 @@ class InteractiveTuner:
         # Calculate slope: (change in pressure) / (change in time) over the interval.
         time_delta = self.df['time'].diff(periods=samples_per_interval).replace(0, 1e-9) # Avoid division by zero
         slope_pb = pb_filtered.diff(periods=samples_per_interval) / time_delta
+        slope_pr = pr_filtered.diff(periods=samples_per_interval) / time_delta
 
         # --- Filter the slope if enabled ---
-        slope_to_analyze = slope_pb.copy()
+        slope_to_analyze_pb = slope_pb.copy()
         if self.use_slope_filter:
-            slope_to_analyze = slope_to_analyze.ewm(alpha=self.slope_ema_alpha, adjust=False).mean()
+            slope_to_analyze_pb = slope_to_analyze_pb.ewm(alpha=self.slope_ema_alpha, adjust=False).mean()
 
-        # --- Find Settling Time ---
-        self.settling_time = None
-        self.settling_duration = None
-
-        # Create a mask for the time range to search
-        search_mask = self.df['time'] >= self.initial_search_time
-
-
-        # Check if there's any data in the search range
-        if search_mask.any():
-            # Find integer locations of points within the search range where the slope exceeds the threshold
-            unstable_ilocs = np.where(search_mask & (slope_to_analyze.abs() > self.slope_threshold))[0]
-
-            if len(unstable_ilocs) == 0:
-                # If no points exceed the threshold, it's settled from the start of the search range.
-                # Find the first valid index in the search mask.
-                first_search_iloc = np.where(search_mask)[0][0]
-                self.settling_time = self.df.iloc[first_search_iloc]['time']
-            else:
-                # The settling point is the one immediately after the last unstable point
-                last_unstable_iloc = unstable_ilocs[-1]
-                settling_iloc = last_unstable_iloc + 1
-
-                if settling_iloc < len(self.df):
-                    self.settling_time = self.df.iloc[settling_iloc]['time']
-                # else: no settling point found within the dataframe
-
-            if self.settling_time is not None:
-                # Ensure settling_duration is a scalar float
-                duration = self.settling_time - self.initial_search_time
-                self.settling_duration = max(0.0, float(duration))
+        slope_to_analyze_pr = slope_pr.copy()
+        if self.use_slope_filter:
+            slope_to_analyze_pr = slope_to_analyze_pr.ewm(alpha=self.slope_ema_alpha, adjust=False).mean()
 
         static_df = self.df[
             (self.df[col_vel_g].abs() < VEL_THRESHOLD) &
@@ -375,10 +362,149 @@ class InteractiveTuner:
         self.ax1.clear()
         self.ax2.clear()
         self.ax_time.clear()
+        self.ax_a.clear()
+        self.ax_a2.clear()
         self.ax_pressure_pb.clear()
         self.ax_theta_g_t.clear()
         self.ax_slope_pb.clear()
         self.ax_final_pressure.clear()
+        self.ax_pressure_pr.clear()
+        self.ax_theta_g_t_pr.clear()
+        self.ax_slope_pr.clear()
+        self.ax_pr_final_pressure.clear()
+
+        # --- Clear previous multi-target results ---
+        self.settling_results = []
+        self.final_pressure_results = []
+        colors = plt.cm.viridis(np.linspace(0, 1, max(1, len(self.analysis_targets))))
+
+        # --- Loop through each detected target for analysis ---
+        for i, target_info in enumerate(self.analysis_targets):
+            initial_search_time = target_info['initial_search_time']
+            target_g = target_info['target_g']
+            color = colors[i]
+
+            # --- Find Settling Time (for this target) ---
+            settling_time_pb, settling_duration_pb = None, None
+            settling_time_pr, settling_duration_pr = None, None
+
+            avg_dt_settle = self.df['time'].diff().mean()
+            if pd.isna(avg_dt_settle) or avg_dt_settle < 1e-6:
+                stable_samples = int(self.settling_duration_req / 0.01)
+            else:
+                stable_samples = max(1, int(round(self.settling_duration_req / avg_dt_settle)))
+
+            start_search_idx = self.df['time'].sub(initial_search_time).abs().idxmin()
+            theta_g_start = self.df.loc[start_search_idx, col_theta_g]
+            theta_g_settle_threshold = 0.1
+            theta_g_stable_mask = self.df[col_theta_g].sub(theta_g_start).abs() <= theta_g_settle_threshold
+
+            # Analysis for pb
+            slope_stable_mask_pb = slope_to_analyze_pb.abs() <= self.slope_threshold
+            is_stable_pb = slope_stable_mask_pb & theta_g_stable_mask
+            stable_window_sum_pb = is_stable_pb.rolling(window=stable_samples).sum()
+            stable_window_end_indices = stable_window_sum_pb[stable_window_sum_pb >= stable_samples].index
+            stable_window_start_indices = stable_window_end_indices - stable_samples + 1
+            valid_start_indices = stable_window_start_indices[stable_window_start_indices >= start_search_idx]
+
+            if not valid_start_indices.empty:
+                settling_iloc = valid_start_indices[0]
+                settling_time_pb = self.df.iloc[settling_iloc]['time']
+                if settling_time_pb is not None:
+                    settling_duration_pb = max(0.0, float(settling_time_pb - initial_search_time))
+
+            # Analysis for pr
+            slope_stable_mask_pr = slope_to_analyze_pr.abs() <= self.slope_threshold
+            is_stable_pr = slope_stable_mask_pr & theta_g_stable_mask
+            stable_window_sum_pr = is_stable_pr.rolling(window=stable_samples).sum()
+            stable_window_end_indices_pr = stable_window_sum_pr[stable_window_sum_pr >= stable_samples].index
+            stable_window_start_indices_pr = stable_window_end_indices_pr - stable_samples + 1
+            valid_start_indices_pr = stable_window_start_indices_pr[stable_window_start_indices_pr >= start_search_idx]
+
+            if not valid_start_indices_pr.empty:
+                settling_iloc_pr = valid_start_indices_pr[0]
+                settling_time_pr = self.df.iloc[settling_iloc_pr]['time']
+                if settling_time_pr is not None:
+                    settling_duration_pr = max(0.0, float(settling_time_pr - initial_search_time))
+
+            self.settling_results.append({
+                'target_g': target_g,
+                'initial_search_time': initial_search_time,
+                'settling_time_pb': settling_time_pb,
+                'settling_duration_pb': settling_duration_pb,
+                'settling_time_pr': settling_time_pr,
+                'settling_duration_pr': settling_duration_pr,
+                'color': color
+            })
+
+            # --- Final Pressure Analysis (for this target) ---
+            analysis_start_time = initial_search_time
+            analysis_end_time = analysis_start_time + self.duration_param
+            analysis_mask = (self.df['time'] >= analysis_start_time) & (self.df['time'] <= analysis_end_time)
+            analysis_df = self.df[analysis_mask].copy()
+
+            median_pbf, median_prf = None, None
+            popt_pb, popt_pr = None, None
+            r_squared_pb, r_squared_pr = None, None
+            t_pbf, pbf_values, t_prf, prf_values = [], [], [], []
+
+            if not analysis_df.empty and len(analysis_df) > 1:
+                analysis_df['t_shifted'] = analysis_df['time'] - analysis_start_time
+                t_np = analysis_df['t_shifted'].to_numpy(dtype=float)
+                tau = 0.25 * self.ts_param
+                
+                # For pb
+                pb_window = pb_filtered[analysis_mask]
+                pbi = pb_window.iloc[0]
+                pb_window_np = pb_window.to_numpy(dtype=float)
+
+                # For pr
+                pr_window = pr_filtered[analysis_mask]
+                pri = pr_window.iloc[0]
+                pr_window_np = pr_window.to_numpy(dtype=float)
+
+                with np.errstate(divide='ignore', invalid='ignore'): # Suppress div by zero on first element
+                    exp_term = np.exp(-t_np / tau)
+                    pbf_float = (pb_window_np - pbi * exp_term) / (1 - exp_term)
+                    prf_float = (pr_window_np - pri * exp_term) / (1 - exp_term)
+
+                pbf_values = pbf_float[1:]
+                t_pbf = t_np[1:]
+                if len(pbf_values) > 0: median_pbf = np.median(pbf_values)
+
+                prf_values = prf_float[1:]
+                t_prf = t_np[1:]
+                if len(prf_values) > 0: median_prf = np.median(prf_values)
+
+                try:
+                    p0 = (pb_window_np[0] - pb_window_np[-1], -0.1, pb_window_np[-1])
+                    popt_pb, _ = curve_fit(exp_func, t_np, pb_window_np, p0=p0, maxfev=5000, bounds=([-np.inf, -np.inf, 0], [np.inf, 0, np.inf]))
+                    residuals = pb_window_np - exp_func(t_np, *popt_pb)
+                    r_squared_pb = 1 - (np.sum(residuals**2) / np.sum((pb_window_np - np.mean(pb_window_np))**2))
+                except (RuntimeError, ValueError): pass
+
+                try:
+                    p0 = (pr_window_np[0] - pr_window_np[-1], -0.1, pr_window_np[-1])
+                    popt_pr, _ = curve_fit(exp_func, t_np, pr_window_np, p0=p0, maxfev=5000, bounds=([-np.inf, -np.inf, 0], [np.inf, 0, np.inf]))
+                    residuals = pr_window_np - exp_func(t_np, *popt_pr)
+                    r_squared_pr = 1 - (np.sum(residuals**2) / np.sum((pr_window_np - np.mean(pr_window_np))**2))
+                except (RuntimeError, ValueError): pass
+
+            self.final_pressure_results.append({
+                'target_g': target_g,
+                'initial_search_time': initial_search_time,
+                'median_pbf': median_pbf,
+                'median_prf': median_prf,
+                't_pbf': t_pbf,
+                'pbf_values': pbf_values,
+                't_prf': t_prf,
+                'prf_values': prf_values,
+                'fit_params_pb': popt_pb,
+                'fit_params_pr': popt_pr,
+                'r_squared_pb': r_squared_pb,
+                'r_squared_pr': r_squared_pr,
+                'color': color
+            })
 
         # Update the main plot window's title
         self.fig.suptitle(f'Load Estimation Analysis for "{self.current_filename}"', fontsize=16)
@@ -419,46 +545,12 @@ class InteractiveTuner:
         self.ax2.set_ylabel('Estimated Mass (w) [kg]')
         self.ax2.grid(True)
 
-        # --- Subplot 3 is now commented out ---
-
-        # --- Plot for Load vs Time in a separate window ---
-        self.time_fig.suptitle(f'Figure 2: Estimated Load vs. Time for "{self.current_filename}"')
-        if 'time' in self.df.columns:
-            # --- Subplot 1: Load vs Time ---
-            self.ax_time.plot(self.df['time'], self.df[col_w_calculated], label='Live Calc Mass (w)')
-            # The 'Actual Load' line has been removed as it was tied to the hardcoded file list.
-
-            self.ax_time.legend()
-            self.ax_time.grid(True)
-            self.ax_time.set_title('Estimated Load vs. Time')
-            self.ax_time.set_ylabel('Estimated Mass (w) [kg]')
-            self.ax_time.set_xlabel('Time (s)')
-
-        else:
-            self.ax_time.text(0.5, 0.5, "'__time' column not found in CSV.",
-                              horizontalalignment='center', verticalalignment='center',
-                              transform=self.ax_time.transAxes)
-
         # --- Plot for Pressure Analysis in a separate window ---
-        self.pressure_fig.suptitle(f'Figure 3: Pressure Analysis for "{self.current_filename}"')
+        self.pressure_fig.suptitle(f'Figure 3: Pressure Analysis (pb) for "{self.current_filename}"')
         if 'time' in self.df.columns:
             # --- Top-left: Raw vs Filtered Pressure (pb) ---
             self.ax_pressure_pb.plot(self.df['time'], self.df[col_pb], label='Raw pb', color='cyan', alpha=0.7)
             self.ax_pressure_pb.plot(self.df['time'], pb_filtered, label=f'Filtered pb ({self.applied_filters_str})', color='blue')
-            self.ax_pressure_pb.axvline(x=self.initial_search_time, color='orange', linestyle=':', lw=2, label=f'Search Start: {self.initial_search_time:.1f}s')
-
-            # Add text for pressure at start time
-            start_idx = self.df['time'].sub(self.initial_search_time).abs().idxmin()
-            pb_at_start = pb_filtered.loc[start_idx]
-            self.ax_pressure_pb.text(self.initial_search_time, pb_at_start, f' {pb_at_start:.1f}', color='orange', ha='left', va='bottom', bbox=dict(facecolor='white', alpha=0.5, edgecolor='none', pad=0.1))
-
-            if self.settling_time is not None:
-                self.ax_pressure_pb.axvline(x=self.settling_time, color='green', linestyle='--', lw=2, label=f'Settling Time: {self.settling_time:.2f}s')
-
-                # Add text for pressure at settling time
-                settle_idx = self.df['time'].sub(self.settling_time).abs().idxmin()
-                pb_at_settle = pb_filtered.loc[settle_idx]
-                self.ax_pressure_pb.text(self.settling_time, pb_at_settle, f' {pb_at_settle:.1f}', color='green', ha='left', va='top', bbox=dict(facecolor='white', alpha=0.5, edgecolor='none', pad=0.1))
 
             self.ax_pressure_pb.set_title('Raw vs. Filtered Pressure (pb)')
             self.ax_pressure_pb.set_ylabel('Pressure (ADC value)')
@@ -467,146 +559,239 @@ class InteractiveTuner:
 
             # --- Top-right: Boom Angle (theta_g) vs Time ---
             self.ax_theta_g_t.plot(self.df['time'], self.df[col_theta_g], label='θg', color='purple')
-            self.ax_theta_g_t.axvline(x=self.initial_search_time, color='orange', linestyle=':', lw=2, label=f'Search Start: {self.initial_search_time:.1f}s')
-            if self.settling_time is not None:
-                self.ax_theta_g_t.axvline(x=self.settling_time, color='green', linestyle='--', lw=2, label=f'Settling Time: {self.settling_time:.2f}s')
             self.ax_theta_g_t.set_title('Boom Angle (θg) vs. Time')
             self.ax_theta_g_t.set_ylabel('Angle (rad)')
-            self.ax_theta_g_t.legend(fontsize='small')
             self.ax_theta_g_t.grid(True)
+
+            # --- Add multi-target lines to pressure plots ---
+            for res in self.settling_results:
+                color = res['color']
+                initial_search_time = res['initial_search_time']
+                settling_time_pb = res['settling_time_pb']
+                label_prefix = f"Tgt {res['target_g']:.2f}"
+
+                # Add lines to pb pressure plot
+                self.ax_pressure_pb.axvline(x=initial_search_time, color=color, linestyle=':', lw=2, label=f'Start {label_prefix}')
+                if settling_time_pb is not None:
+                    self.ax_pressure_pb.axvline(x=settling_time_pb, color=color, linestyle='--', lw=2, label=f'Settle {label_prefix}')
+
+                # Add lines to theta_g plot
+                self.ax_theta_g_t.axvline(x=initial_search_time, color=color, linestyle=':', lw=2)
+                if settling_time_pb is not None:
+                    self.ax_theta_g_t.axvline(x=settling_time_pb, color=color, linestyle='--', lw=2)
+
+                # Add lines to slope plot
+                self.ax_slope_pb.axvline(x=initial_search_time, color=color, linestyle=':', lw=2)
+                if settling_time_pb is not None:
+                    self.ax_slope_pb.axvline(x=settling_time_pb, color=color, linestyle='--', lw=2)
 
             # --- Bottom row: Slope of pb ---
             title_slope_pb = 'Slope of Filtered pb (for Settling Time)'
             if self.use_slope_filter:
                 self.ax_slope_pb.plot(self.df['time'], slope_pb, label='Unfiltered Slope', color='blue', alpha=0.4)
-                self.ax_slope_pb.plot(self.df['time'], slope_to_analyze, label='Filtered Slope (EMA)', color='red')
+                self.ax_slope_pb.plot(self.df['time'], slope_to_analyze_pb, label='Filtered Slope (EMA)', color='red')
             else:
                 self.ax_slope_pb.plot(self.df['time'], slope_pb, label='Slope pb', color='blue')
 
             self.ax_slope_pb.axhline(y=self.slope_threshold, color='gray', linestyle='--', lw=1)
             self.ax_slope_pb.axhline(y=-self.slope_threshold, color='gray', linestyle='--', lw=1, label=f'Threshold ({self.slope_threshold:.1f})')
-            self.ax_slope_pb.axvline(x=self.initial_search_time, color='orange', linestyle=':', lw=2, label=f'Search Start: {self.initial_search_time:.1f}s')
 
-            if self.settling_time is not None:
-                self.ax_slope_pb.axvline(x=self.settling_time, color='green', linestyle='--', lw=2, label=f'Settling Time: {self.settling_time:.2f}s')
-                title_slope_pb += f'\nTime to Settle: {self.settling_duration:.2f}s'
-            elif search_mask.any():
-                title_slope_pb += '\n(No settling point found)'
-
+            settle_durations_pb = [f"Tgt {r['target_g']:.2f}: {r['settling_duration_pb']:.2f}s" for r in self.settling_results if r['settling_duration_pb'] is not None]
+            if settle_durations_pb:
+                title_slope_pb += '\nTime to Settle: ' + ', '.join(settle_durations_pb)
+            
             self.ax_slope_pb.set_title(title_slope_pb)
             self.ax_slope_pb.set_ylabel('Pressure Slope')
             self.ax_slope_pb.set_xlabel('Time (s)')
             self.ax_slope_pb.legend(fontsize='small')
             self.ax_slope_pb.grid(True)
 
-        # --- Plot for Final Pressure Analysis in a separate window ---
-        self.final_pressure_fig.suptitle(f'Figure 4: Final Pressure Analysis for "{self.current_filename}"')
-        
-        # Define the analysis window
-        analysis_start_time = self.initial_search_time
-        analysis_end_time = analysis_start_time + self.duration_param
-        
-        analysis_mask = (self.df['time'] >= analysis_start_time) & (self.df['time'] <= analysis_end_time)
-        analysis_df = self.df[analysis_mask].copy()
-        
-        if not analysis_df.empty and len(analysis_df) > 1:
-            # 1. Set time at search start time to 0
-            analysis_df['t_shifted'] = analysis_df['time'] - analysis_start_time
-            pb_window = pb_filtered[analysis_mask]
-            
-            # Get initial pressure
-            pbi = pb_window.iloc[0]
+        # --- Plot for pr Pressure Analysis in a separate window ---
+        self.pr_pressure_fig.suptitle(f'Figure 5: Pressure Analysis (pr) for "{self.current_filename}"')
+        if 'time' in self.df.columns:
+            # --- Top-left: Raw vs Filtered Pressure (pr) ---
+            self.ax_pressure_pr.plot(self.df['time'], self.df[col_pr], label='Raw pr', color='sandybrown', alpha=0.7)
+            self.ax_pressure_pr.plot(self.df['time'], pr_filtered, label=f'Filtered pr ({self.applied_filters_str})', color='red')
+            self.ax_pressure_pr.set_title('Raw vs. Filtered Pressure (pr)')
+            self.ax_pressure_pr.set_ylabel('Pressure (ADC value)')
+            self.ax_pressure_pr.legend(fontsize='small')
+            self.ax_pressure_pr.grid(True)
 
-            # For calculations, use numpy arrays to avoid potential type issues with linters
-            t_np = analysis_df['t_shifted'].to_numpy(dtype=float)
-            pb_window_np = pb_window.to_numpy(dtype=float)
-            
-            # 4. Calculate pbf
-            tau = 0.25 * self.ts_param
-            
-            with np.errstate(divide='ignore', invalid='ignore'):
-                exp_term = np.exp(-t_np / tau)
-                pbf_float = (pb_window_np - pbi * exp_term) / (1 - exp_term)
-            
-            # 5. Convert pbf to integer
-            pbf_int = np.round(pbf_float[1:])
-            t_pbf = t_np[1:]
-            
-            # 6. Calculate statistics
-            if len(pbf_int) > 0:
-                pbf_mean = np.mean(pbf_int)
-                pbf_median = np.median(pbf_int)
-                pbf_std = np.std(pbf_int)
-                pbf_mode_result = stats.mode(pbf_int, keepdims=True)
-                pbf_mode = str(pbf_mode_result.mode[0])
-                
-                stats_text = (f"Stats for pbf:\n"
-                              f"Mean: {pbf_mean:.2f}\n"
-                              f"Median: {pbf_median:.2f}\n"
-                              f"Mode: {pbf_mode}\n"
-                              f"Std Dev: {pbf_std:.2f}")
+            # --- Top-right: Boom Angle (theta_g) vs Time ---
+            self.ax_theta_g_t_pr.plot(self.df['time'], self.df[col_theta_g], label='θg', color='purple')
+            self.ax_theta_g_t_pr.set_title('Boom Angle (θg) vs. Time')
+            self.ax_theta_g_t_pr.set_ylabel('Angle (rad)')
+            self.ax_theta_g_t_pr.grid(True)
+
+            # --- Add multi-target lines to pr pressure plots ---
+            for res in self.settling_results:
+                color = res['color']
+                initial_search_time = res['initial_search_time']
+                settling_time_pr = res['settling_time_pr']
+                label_prefix = f"Tgt {res['target_g']:.2f}"
+
+                self.ax_pressure_pr.axvline(x=initial_search_time, color=color, linestyle=':', lw=2, label=f'Start {label_prefix}')
+                if settling_time_pr is not None:
+                    self.ax_pressure_pr.axvline(x=settling_time_pr, color=color, linestyle='--', lw=2, label=f'Settle {label_prefix}')
+
+                self.ax_theta_g_t_pr.axvline(x=initial_search_time, color=color, linestyle=':', lw=2)
+                if settling_time_pr is not None:
+                    self.ax_theta_g_t_pr.axvline(x=settling_time_pr, color=color, linestyle='--', lw=2)
+
+                self.ax_slope_pr.axvline(x=initial_search_time, color=color, linestyle=':', lw=2)
+                if settling_time_pr is not None:
+                    self.ax_slope_pr.axvline(x=settling_time_pr, color=color, linestyle='--', lw=2)
+
+            # --- Bottom row: Slope of pr ---
+            title_slope_pr = 'Slope of Filtered pr (for Settling Time)'
+            if self.use_slope_filter:
+                self.ax_slope_pr.plot(self.df['time'], slope_pr, label='Unfiltered Slope', color='red', alpha=0.4)
+                self.ax_slope_pr.plot(self.df['time'], slope_to_analyze_pr, label='Filtered Slope (EMA)', color='darkred')
             else:
-                stats_text = "Not enough data for pbf stats."
+                self.ax_slope_pr.plot(self.df['time'], slope_pr, label='Slope pr', color='red')
 
-            # 7. Generate chart pbf(t)
-            self.ax_final_pressure.plot(t_pbf, pbf_int, marker='o', linestyle='-', label='pbf (integer)')
+            self.ax_slope_pr.axhline(y=self.slope_threshold, color='gray', linestyle='--', lw=1)
+            self.ax_slope_pr.axhline(y=-self.slope_threshold, color='gray', linestyle='--', lw=1, label=f'Threshold ({self.slope_threshold:.1f})')
+
+            settle_durations_pr = [f"Tgt {r['target_g']:.2f}: {r['settling_duration_pr']:.2f}s" for r in self.settling_results if r['settling_duration_pr'] is not None]
+            if settle_durations_pr:
+                title_slope_pr += '\nTime to Settle: ' + ', '.join(settle_durations_pr)
             
-            # 8. Exponential curve fitting
-            def exp_func(x, a, b, c):
-                return a * np.exp(b * x) + c
+            self.ax_slope_pr.set_title(title_slope_pr)
+            self.ax_slope_pr.set_ylabel('Pressure Slope')
+            self.ax_slope_pr.set_xlabel('Time (s)')
+            self.ax_slope_pr.legend(fontsize='small')
+            self.ax_slope_pr.grid(True)
 
-            try:
-                # A more robust initial guess for the curve fit:
-                # a: initial amplitude (initial value - final value)
-                # b: decay rate (a small negative number)
-                # c: final offset (the value it settles to)
-                p0 = (pb_window_np[0] - pb_window_np[-1], -0.1, pb_window_np[-1])
-                popt, _ = curve_fit(exp_func, t_np, pb_window_np, p0=p0, maxfev=5000, bounds=([-np.inf, -np.inf, 0], [np.inf, 0, np.inf]))
+        # --- Plot for Final Pressure Analysis in a separate window ---
+        # Clear axes first
+        self.ax_final_pressure.clear()
+        self.ax_pr_final_pressure.clear()
 
-                # Plot the final pressure from the curve fit as a horizontal line for comparison
-                final_pressure_fit = popt[2]
-                self.ax_final_pressure.axhline(y=final_pressure_fit, color='red', linestyle='--', label=f'Fit Final Pressure: {final_pressure_fit:.2f}')
+        self.final_pressure_fig.suptitle(f'Figure 4: Final Pressure Analysis (pb) for "{self.current_filename}"')
+        self.pr_final_pressure_fig.suptitle(f'Figure 6: Final Pressure Analysis (pr) for "{self.current_filename}"')
 
-                residuals = pb_window_np - exp_func(t_np, *popt)
-                ss_res = np.sum(residuals**2)
-                ss_tot = np.sum((pb_window_np - np.mean(pb_window_np))**2)
-                r_squared = 1 - (ss_res / ss_tot)
-                eq_text = (f"Fit: y = {popt[0]:.2f} * e^({popt[1]:.2f}*t) + {final_pressure_fit:.2f}\n"
-                           f"R² = {r_squared:.4f}")
-                print(f"--- Figure 4 Curve Fit ---\n{eq_text}\n")
-            except (RuntimeError, ValueError):
-                eq_text = "Curve fit failed."
-                print("--- Figure 4 Curve Fit ---\nCurve fit failed.\n")
-            
-            self.ax_final_pressure.text(0.05, 0.95, stats_text, transform=self.ax_final_pressure.transAxes, fontsize=10, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-            self.ax_final_pressure.text(0.95, 0.95, eq_text, transform=self.ax_final_pressure.transAxes, fontsize=10, verticalalignment='top', horizontalalignment='right', bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.5))
-            self.ax_final_pressure.set_title('pbf Analysis')
-            self.ax_final_pressure.set_xlabel('Time since Search Start (s)')
-            self.ax_final_pressure.set_ylabel('pbf (ADC value, integer)')
-            self.ax_final_pressure.legend()
-            self.ax_final_pressure.grid(True)
+        for res in self.final_pressure_results:
+            color = res['color']
+            target_g = res['target_g']
+            label_prefix = f"Tgt {target_g:.2f}"
+
+            # Plot for pb
+            if res['median_pbf'] is not None:
+                self.ax_final_pressure.plot(res['t_pbf'], res['pbf_values'], marker='o', linestyle='-', color=color, label=f'pbf ({label_prefix}): {res["median_pbf"]:.1f}')
+                if res['fit_params_pb'] is not None:
+                    final_pressure_fit = res['fit_params_pb'][2]
+                    self.ax_final_pressure.axhline(y=final_pressure_fit, color=color, linestyle='--', label=f'Fit Final P ({label_prefix}): {final_pressure_fit:.2f}')
+
+            # Plot for pr
+            if res['median_prf'] is not None:
+                self.ax_pr_final_pressure.plot(res['t_prf'], res['prf_values'], marker='o', linestyle='-', color=color, label=f'prf ({label_prefix}): {res["median_prf"]:.1f}')
+                if res['fit_params_pr'] is not None:
+                    final_pressure_fit_r = res['fit_params_pr'][2]
+                    self.ax_pr_final_pressure.axhline(y=final_pressure_fit_r, color=color, linestyle='--', label=f'Fit Final P ({label_prefix}): {final_pressure_fit_r:.2f}')
+
+        self.ax_final_pressure.set_title('pbf Analysis')
+        self.ax_final_pressure.set_xlabel('Time since Search Start (s)')
+        self.ax_final_pressure.set_ylabel('pbf (ADC value)')
+        self.ax_final_pressure.legend()
+        self.ax_final_pressure.grid(True)
+
+        self.ax_pr_final_pressure.set_title('prf Analysis')
+        self.ax_pr_final_pressure.set_xlabel('Time since Search Start (s)')
+        self.ax_pr_final_pressure.set_ylabel('prf (ADC value)')
+        self.ax_pr_final_pressure.legend()
+        self.ax_pr_final_pressure.grid(True)
+
+        # --- Plot for Load vs Time in a separate window (Figure 2) ---
+        self.time_fig.suptitle(f'Figure 2: Load & Geometry vs. Time for "{self.current_filename}"')
+        if 'time' in self.df.columns:
+            # --- Find the start of the static condition to define the plotting region ---
+            if self.analysis_targets:
+                plot_start_time = self.analysis_targets[0]['initial_search_time']
+                plot_df = self.df[self.df['time'] >= plot_start_time].copy()
+            else:
+                plot_df = self.df.copy()
+
+            # --- "Time-Varying Pressure" line ---
+            if not plot_df.empty:
+                self.ax_time.plot(plot_df['time'], plot_df[col_w_calculated], label='Est. Mass (Time-Varying Pressure)')
+
+            # --- Discontinuous "Predicted Settle Pressure" lines ---
+            for i, res in enumerate(self.final_pressure_results):
+                median_pbf = res.get('median_pbf')
+                median_prf = res.get('median_prf')
+
+                if median_pbf is None or median_prf is None:
+                    continue
+
+                start_time = res['initial_search_time']
+                end_time = self.final_pressure_results[i+1]['initial_search_time'] if i + 1 < len(self.final_pressure_results) else self.df['time'].iloc[-1]
+
+                plot_mask = (self.df['time'] >= start_time) & (self.df['time'] < end_time)
+                segment_df = self.df[plot_mask]
+
+                if segment_df.empty:
+                    continue
+
+                Fc_new = 2 * (Ab * median_pbf - Ar * median_prf) * toPa
+                w_predicted = self.calculate_mass(segment_df[col_theta_g], Fc_new)
+                mass_at_start = w_predicted.iloc[0]
+
+                self.ax_time.plot(segment_df['time'], w_predicted,
+                                  label=f'Est. Mass (Tgt {res["target_g"]:.2f}) ({mass_at_start:.1f} kg)',
+                                  linestyle='--', color=res['color'])
+
+            self.ax_time.legend()
+            self.ax_time.grid(True)
+            self.ax_time.set_title('Estimated Load vs. Time (from static start)')
+            self.ax_time.set_ylabel('Estimated Mass (w) [kg]')
+
+            # --- Plot for Geometry Factor 'a' and theta_g ---
+            if not plot_df.empty:
+                theta_g_plot = plot_df[col_theta_g]
+                Lih = np.sqrt(Lgh**2 + Lgi**2 - 2 * Lgh * Lgi * np.cos(theta_g_plot + IGO))
+                GIH = np.arcsin(np.clip((Lgh / Lih) * np.sin(theta_g_plot + IGO), -1.0, 1.0))
+                Hbmcyl = np.pi - IGO - GIH
+                a_values = np.sin(Hbmcyl) - np.cos(Hbmcyl) * np.tan(theta_g_plot)
+
+                # Plot 'a' on the primary y-axis
+                p1 = self.ax_a.plot(plot_df['time'], a_values, label='Geometry Factor (a)', color='purple')
+                self.ax_a.set_ylabel('Value of a', color='purple')
+                self.ax_a.tick_params(axis='y', labelcolor='purple')
+                self.ax_a.set_xlabel('Time (s)')
+                self.ax_a.grid(True)
+
+                # Use the existing secondary y-axis for theta_g
+                p2 = self.ax_a2.plot(plot_df['time'], theta_g_plot, label='Boom Angle (θg)', color='green', linestyle=':')
+                self.ax_a2.set_ylabel('θg (rad)', color='green')
+                self.ax_a2.tick_params(axis='y', labelcolor='green')
+
+                # Combine legends
+                plots = p1 + p2
+                labels = [p.get_label() for p in plots]
+                self.ax_a.legend(plots, labels, loc='best')
+
         else:
-            self.ax_final_pressure.text(0.5, 0.5, "No data in analysis window.", horizontalalignment='center', verticalalignment='center', transform=self.ax_final_pressure.transAxes)
+            self.ax_time.text(0.5, 0.5, "'__time' column not found in CSV.",
+                              horizontalalignment='center', verticalalignment='center',
+                              transform=self.ax_time.transAxes)
 
         self.time_fig.canvas.draw_idle()
         self.pressure_fig.canvas.draw_idle()
         self.fig.canvas.draw_idle()
         self.final_pressure_fig.canvas.draw_idle()
+        self.pr_pressure_fig.canvas.draw_idle()
+        self.pr_final_pressure_fig.canvas.draw_idle()
 
     def update_params(self, val):
         self.k1 = self.slider_k1.val
         self.k2 = self.slider_k2.val
-        self.k3 = self.slider_k3.val
-        self.k4 = self.slider_k4.val
         self.recalculate_and_plot()
 
     def toggle_compensation(self, label):
         self.use_compensation = self.check_comp.get_status()[0]
         self.recalculate_and_plot()
 
-    def toggle_bucket_compensation(self, label):
-        self.use_bucket_compensation = self.check_bucket_comp.get_status()[0]
-        self.recalculate_and_plot()
 
     def toggle_figure_visibility(self, label):
         """
@@ -615,7 +800,7 @@ class InteractiveTuner:
         without closing them, which is cleaner than closing and recreating figures.
         It may not work with other matplotlib backends.
         """
-        main_vis, time_vis, pressure_vis, final_pressure_vis = self.check_figs.get_status()
+        main_vis, time_vis, pressure_vis_pb, final_pressure_vis_pb, pressure_vis_pr, final_pressure_vis_pr = self.check_figs.get_status()
 
         def _toggle_win(fig, is_visible):
             """Helper to safely toggle a window's visibility."""
@@ -628,8 +813,10 @@ class InteractiveTuner:
 
         _toggle_win(self.fig, main_vis)
         _toggle_win(self.time_fig, time_vis)
-        _toggle_win(self.pressure_fig, pressure_vis)
-        _toggle_win(self.final_pressure_fig, final_pressure_vis)
+        _toggle_win(self.pressure_fig, pressure_vis_pb)
+        _toggle_win(self.final_pressure_fig, final_pressure_vis_pb)
+        _toggle_win(self.pr_pressure_fig, pressure_vis_pr)
+        _toggle_win(self.pr_final_pressure_fig, final_pressure_vis_pr)
 
     def toggle_filters(self, label):
         self.use_median_filter, self.use_ema_filter = self.check_filters.get_status()
@@ -638,6 +825,14 @@ class InteractiveTuner:
     def update_filter_params(self, val):
         self.ema_alpha = self.slider_ema_alpha.val
         self.median_window = self.slider_median_win.val
+        self.recalculate_and_plot()
+
+    def update_sensor_scale_factor(self, text):
+        try:
+            self.sensor_scale_factor = float(text)
+        except ValueError:
+            print(f"Invalid input for Sensor Scale Factor: '{text}'. Please enter a valid number.")
+            return
         self.recalculate_and_plot()
 
     def update_slope_filter_params(self, text):
@@ -661,50 +856,67 @@ class InteractiveTuner:
         self.slope_time_interval = self.slider_slope_interval.val
         self.recalculate_and_plot()
 
-    def update_settling_params(self, val):
-        self.initial_search_time = self.slider_initial_time.val
+    def update_settling_params(self, text_or_val):
+        # This handler is called by both the slider and the textbox
         self.slope_threshold = self.slider_slope_thresh.val
+        try:
+            self.settling_duration_req = float(self.text_settling_dur_req.text)
+        except ValueError:
+            print(f"Invalid input for Stable Duration: '{self.text_settling_dur_req.text}'. Please enter a valid number.")
+            self.text_settling_dur_req.set_val(str(self.settling_duration_req))
+
         self.recalculate_and_plot()
-
-    def toggle_auto_initial_time(self, label):
-        self.use_auto_initial_time = self.check_auto_time.get_status()[0]
-        is_manual_mode = not self.use_auto_initial_time
-        self.slider_initial_time.set_active(is_manual_mode)
-
-        if self.use_auto_initial_time:
-            self.run_auto_initial_time_detection()
-        else:
-            self.recalculate_and_plot()
 
     def update_auto_time_params(self, text):
         try:
-            self.target_theta_g = float(self.text_target_theta.text)
+            targets_str = self.text_target_theta.text.split(',')
+            self.target_theta_g_list = [float(t.strip()) for t in targets_str if t.strip()]
             self.theta_g_threshold = float(self.text_theta_thresh.text)
             self.vel_g_threshold_auto = float(self.text_vel_thresh.text)
             self.acc_g_threshold_auto = float(self.text_acc_thresh.text)
+            print(f"Updated auto-detect targets to: {self.target_theta_g_list}")
         except ValueError:
-            print(f"Invalid input: '{text}'. Please enter a valid number.")
+            print(f"Invalid input: '{text}'. Please enter valid, comma-separated numbers.")
             return
-        if self.use_auto_initial_time:
-            self.run_auto_initial_time_detection()
+        self.run_auto_initial_time_detection()
 
     def toggle_slope_filter(self, label):
         self.use_slope_filter = self.check_slope_filter.get_status()[0]
         self.recalculate_and_plot()
 
     def run_auto_initial_time_detection(self):
-        cond_theta = (self.df[col_theta_g] >= self.target_theta_g - self.theta_g_threshold) & \
-                     (self.df[col_theta_g] <= self.target_theta_g + self.theta_g_threshold)
-        cond_vel = self.df[col_vel_g].abs() < self.vel_g_threshold_auto
-        cond_acc = self.df[col_acc_g].abs() < self.acc_g_threshold_auto
+        self.analysis_targets = []
+        for target_g in self.target_theta_g_list:
+            # Find the time when theta_g is closest to the target value.
+            closest_idx = self.df[col_theta_g].sub(target_g).abs().idxmin()
+            t_target_center = self.df.loc[closest_idx]['time']
 
-        first_match_df = self.df[cond_theta & cond_vel & cond_acc]
+            # Define the search window of [-200, +200] seconds
+            search_start = max(0, t_target_center - 200)
+            search_end = t_target_center + 200
 
-        if not first_match_df.empty:
-            auto_initial_time = first_match_df['time'].iloc[0]
-            self.slider_initial_time.set_val(auto_initial_time)
-        else:
-            print("Auto-detect: No time found that satisfies all conditions.")
+            # Create masks for the search conditions
+            time_window_mask = (self.df['time'] >= search_start) & (self.df['time'] <= search_end)
+            cond_theta = (self.df[col_theta_g] >= target_g - self.theta_g_threshold) & \
+                         (self.df[col_theta_g] <= target_g + self.theta_g_threshold)
+            cond_vel = self.df[col_vel_g].abs() < self.vel_g_threshold_auto
+            cond_acc = self.df[col_acc_g].abs() < self.acc_g_threshold_auto
+
+            # Find all matching points within the window
+            match_df = self.df[time_window_mask & cond_theta & cond_vel & cond_acc]
+
+            if not match_df.empty:
+                auto_initial_time = match_df['time'].iloc[0]
+                print(f"Auto-detect: Found static point for target {target_g:.2f} at time {auto_initial_time:.2f}s (searched [{search_start:.2f}s, {search_end:.2f}s])")
+                self.analysis_targets.append({'target_g': target_g, 'initial_search_time': auto_initial_time})
+            else:
+                print(f"Auto-detect: No static point found for target {target_g:.2f} in window [{search_start:.2f}s, {search_end:.2f}s]")
+
+        # Sort targets by their search time to process them in chronological order
+        self.analysis_targets.sort(key=lambda x: x['initial_search_time'])
+
+        # Manually trigger a replot with the new initial time.
+        self.recalculate_and_plot()
 
     def load_file(self, csv_file_path):
         """Loads a CSV file, processes it, and triggers a replot."""
@@ -734,21 +946,18 @@ class InteractiveTuner:
         default_target = 0.3
         if match:
             try:
-                self.target_theta_g = float(match.group(1))
-                print(f"Auto-set target_theta_g from filename to: {self.target_theta_g}")
+                self.target_theta_g_list = [float(match.group(1))]
+                print(f"Auto-set target_theta_g from filename to: {self.target_theta_g_list}")
             except (ValueError, IndexError):
-                self.target_theta_g = default_target
-                print(f"Could not parse float from filename. Defaulting target_theta_g to: {default_target}")
+                self.target_theta_g_list = [default_target]
+                print(f"Could not parse float from filename. Defaulting target_theta_g to: {[default_target]}")
         else:
-            self.target_theta_g = default_target
-            print(f"Filename does not contain a float. Defaulting target_theta_g to: {default_target}")
+            self.target_theta_g_list = [default_target]
+            print(f"Filename does not contain a float. Defaulting target_theta_g to: {[default_target]}")
 
-        self.text_target_theta.set_val(str(self.target_theta_g))
+        self.text_target_theta.set_val(', '.join(map(str, self.target_theta_g_list)))
 
-        if self.use_auto_initial_time:
-            self.run_auto_initial_time_detection()
-        else:
-            self.recalculate_and_plot()
+        self.run_auto_initial_time_detection()
 
     def open_file_dialog(self, event):
         """Opens a file dialog to select a CSV file."""

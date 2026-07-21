@@ -9,6 +9,7 @@ from tkinter import filedialog
 import re
 from scipy.optimize import curve_fit
 from scipy import stats
+from matplotlib import cm
 
 # --- Constants ---
 Lgh = 0.163
@@ -40,13 +41,14 @@ class InteractiveTuner:
     def __init__(self, df, current_filename):
         self.df = df.copy()
         self.current_filename = current_filename
-        self.sensor_scale_factor = 2.455
+        self.sensor_scale_factor = 1.0
         self.toPa_base = 40 * 10**6 / (2**15 - 1)
         self.use_compensation = False
         self.k1 = 1640.0
         self.k2 = 0.225
         self.use_median_filter = True
         self.use_ema_filter = True
+        self.use_pressure_offset = False
         self.ema_alpha = 0.001
         self.median_window = 100
         self.slope_time_interval = 0.1
@@ -56,6 +58,7 @@ class InteractiveTuner:
         self.ts_param = 65.0
         self.settling_duration_req = 10.0
         self.duration_param = 3.0
+        self.auto_set_theta_g = False
 
         # Multi-target attributes
         self.target_theta_g_list = []
@@ -63,18 +66,19 @@ class InteractiveTuner:
         self.settling_results = []  # List of dicts for plotting results
         self.final_pressure_results = []  # List of dicts for final pressure results
 
-        match = re.search(r'(\d+\.\d+)', self.current_filename)
-        default_target = 0.3
-        if match:
-            try:
-                self.target_theta_g_list = [float(match.group(1))]
-                print(f"Auto-set target_theta_g from filename to: {self.target_theta_g_list}")
-            except (ValueError, IndexError):
+        if self.auto_set_theta_g:
+            match = re.search(r'(\d+\.\d+)', self.current_filename)
+            default_target = 0.3
+            if match:
+                try:
+                    self.target_theta_g_list = [float(match.group(1))]
+                    print(f"Auto-set target_theta_g from filename to: {self.target_theta_g_list}")
+                except (ValueError, IndexError):
+                    self.target_theta_g_list = [default_target]
+                    print(f"Could not parse float from filename. Defaulting target_theta_g to: {[default_target]}")
+            else:
                 self.target_theta_g_list = [default_target]
-                print(f"Could not parse float from filename. Defaulting target_theta_g to: {[default_target]}")
-        else:
-            self.target_theta_g_list = [default_target]
-            print(f"Filename does not contain a float. Defaulting target_theta_g to: {[default_target]}")
+                print(f"Filename does not contain a float. Defaulting target_theta_g to: {[default_target]}")
 
         self.theta_g_threshold = 0.05 # used for auto-detect
         self.vel_g_threshold_auto = VEL_THRESHOLD
@@ -162,13 +166,13 @@ class InteractiveTuner:
 
         # --- Section 2: Signal Filtering ---
         add_section_title('Pressure Signal Filtering')
-        row_h = h_checkbox_double
+        row_h = h_checkbox_triple
         y_cursor -= row_h
         slider_x = left_margin + content_width * prop_checkbox + h_gap_widget
         slider_w = content_width * prop_slider
         ax_filter_checks = self.control_fig.add_axes([left_margin, y_cursor, content_width * prop_checkbox, row_h])
-        ax_median_win = self.control_fig.add_axes([slider_x, y_cursor + h_widget, slider_w, h_widget])
-        ax_ema_alpha = self.control_fig.add_axes([slider_x, y_cursor, slider_w, h_widget])
+        ax_median_win = self.control_fig.add_axes([slider_x, y_cursor + h_widget * 2, slider_w, h_widget])
+        ax_ema_alpha = self.control_fig.add_axes([slider_x, y_cursor + h_widget, slider_w, h_widget])
         y_cursor -= v_gap_widget
 
         y_cursor -= h_widget
@@ -183,6 +187,11 @@ class InteractiveTuner:
         # --- Section 4: Settling Time Analysis ---
         add_section_title('Settling Time Analysis')
         
+        y_cursor -= h_widget
+        ax_check_auto_theta = self.control_fig.add_axes([left_margin, y_cursor, content_width * 0.5, h_widget])
+        y_cursor -= v_gap_widget
+
+
         y_cursor -= h_widget
         textbox_x = left_margin + content_width * 0.1
         textbox_w = content_width * (prop_half - 0.1)
@@ -223,7 +232,7 @@ class InteractiveTuner:
         self.check_figs = CheckButtons(ax_fig_vis, ['Load(θg)', 'Load(t)', 'Pressure(t) pb', 'Final Pressure pb', 'Pressure(t) pr', 'Final Pressure pr'], actives=[False, False, False, False, False, False])
 
         # Section 2: Signal Filtering
-        self.check_filters = CheckButtons(ax_filter_checks, ['Median', 'EMA'], actives=[self.use_median_filter, self.use_ema_filter])
+        self.check_filters = CheckButtons(ax_filter_checks, ['Median', 'EMA', 'Offset'], actives=[self.use_median_filter, self.use_ema_filter, self.use_pressure_offset])
         self.slider_median_win = Slider(ax_median_win, 'Median Win', 51, 201, valinit=self.median_window, valstep=10)
         self.slider_ema_alpha = Slider(ax_ema_alpha, 'EMA Alpha', 0.001, 0.01, valinit=self.ema_alpha, valstep=0.001)
         self.text_sensor_scale = TextBox(ax_sensor_scale, 'Sensor Scale', initial=str(self.sensor_scale_factor))
@@ -235,6 +244,7 @@ class InteractiveTuner:
 
 
         # Section 4: Settling Time Analysis
+        self.check_auto_theta = CheckButtons(ax_check_auto_theta, ['Auto-set θg from filename'], [self.auto_set_theta_g])
         self.text_target_theta = TextBox(ax_target_theta, 'Target θg (csv)', initial=', '.join(map(str, self.target_theta_g_list)))
         self.text_theta_thresh = TextBox(ax_theta_thresh, 'θg Thresh', initial=str(self.theta_g_threshold))
         self.text_vel_thresh = TextBox(ax_vel_thresh_auto, 'Vel Thresh', initial=str(self.vel_g_threshold_auto))
@@ -260,6 +270,7 @@ class InteractiveTuner:
         self.slider_median_win.on_changed(self.update_filter_params)
         self.slider_slope_interval.on_changed(self.update_slope_params)
         self.slider_slope_thresh.on_changed(self.update_settling_params)
+        self.check_auto_theta.on_clicked(self.toggle_auto_theta)
         self.text_target_theta.on_submit(self.update_auto_time_params)
         self.text_theta_thresh.on_submit(self.update_auto_time_params)
         self.text_vel_thresh.on_submit(self.update_auto_time_params)
@@ -281,7 +292,7 @@ class InteractiveTuner:
         Lih = np.sqrt(Lgh**2 + Lgi**2 - 2 * Lgh * Lgi * np.cos(theta_g + IGO))
         GIH = np.arcsin(np.clip((Lgh / Lih) * np.sin(theta_g + IGO), -1.0, 1.0))
         Hbmcyl = np.pi - IGO - GIH
-        a = np.sin(Hbmcyl) - np.cos(Hbmcyl) * np.tan(theta_g)
+        a = np.sin(Hbmcyl) - np.cos(Hbmcyl)*np.tan(theta_g)
         simple_lever = ((Fc * Lgh / Lag) * a) / 9.807
 
         w = simple_lever
@@ -321,6 +332,17 @@ class InteractiveTuner:
             applied_filters.append('EMA')
         
         self.applied_filters_str = ' -> '.join(applied_filters) if applied_filters else 'None'
+
+        # --- Apply Pressure Offset ---
+        if self.use_pressure_offset:
+            pb_offset = 1699 * theta_g + 4023
+            pr_offset = 413.3
+            pb_filtered -= pb_offset
+            pr_filtered -= pr_offset
+            # Clip at zero to prevent negative pressures
+            pb_filtered = pb_filtered.clip(lower=0)
+            pr_filtered = pr_filtered.clip(lower=0)
+
         # --- Calculate Force ---
         # Calculate the final Pa conversion factor, which now includes the scale factor
         toPa = self.toPa_base * self.sensor_scale_factor
@@ -376,7 +398,7 @@ class InteractiveTuner:
         # --- Clear previous multi-target results ---
         self.settling_results = []
         self.final_pressure_results = []
-        colors = plt.cm.viridis(np.linspace(0, 1, max(1, len(self.analysis_targets))))
+        colors = cm.get_cmap('viridis')(np.linspace(0, 1, max(1, len(self.analysis_targets))))
 
         # --- Loop through each detected target for analysis ---
         for i, target_info in enumerate(self.analysis_targets):
@@ -394,10 +416,10 @@ class InteractiveTuner:
             else:
                 stable_samples = max(1, int(round(self.settling_duration_req / avg_dt_settle)))
 
-            start_search_idx = self.df['time'].sub(initial_search_time).abs().idxmin()
-            theta_g_start = self.df.loc[start_search_idx, col_theta_g]
+            start_search_idx = (self.df['time'] - initial_search_time).abs().idxmin()
+            theta_g_start = float(self.df.at[start_search_idx, col_theta_g])
             theta_g_settle_threshold = 0.1
-            theta_g_stable_mask = self.df[col_theta_g].sub(theta_g_start).abs() <= theta_g_settle_threshold
+            theta_g_stable_mask = (self.df[col_theta_g] - theta_g_start).abs() <= theta_g_settle_threshold
 
             # Analysis for pb
             slope_stable_mask_pb = slope_to_analyze_pb.abs() <= self.slope_threshold
@@ -575,6 +597,18 @@ class InteractiveTuner:
                 if settling_time_pb is not None:
                     self.ax_pressure_pb.axvline(x=settling_time_pb, color=color, linestyle='--', lw=2, label=f'Settle {label_prefix}')
 
+                # Add text annotations for time and pressure
+                start_idx = (self.df['time'] - initial_search_time).abs().idxmin()
+                pressure_at_start = pb_filtered.at[start_idx]
+                time_at_start = self.df.at[start_idx, 'time']
+                self.ax_pressure_pb.text(time_at_start, pressure_at_start, f' ({time_at_start:.1f}s, {pressure_at_start:.1f})', color=color, ha='left', va='bottom', fontsize=9)
+
+                if settling_time_pb is not None:
+                    settle_idx = (self.df['time'] - settling_time_pb).abs().idxmin()
+                    pressure_at_settle = pb_filtered.at[settle_idx]
+                    time_at_settle = self.df.at[settle_idx, 'time']
+                    self.ax_pressure_pb.text(time_at_settle, pressure_at_settle, f' ({time_at_settle:.1f}s, {pressure_at_settle:.1f})', color=color, ha='left', va='top', fontsize=9)
+
                 # Add lines to theta_g plot
                 self.ax_theta_g_t.axvline(x=initial_search_time, color=color, linestyle=':', lw=2)
                 if settling_time_pb is not None:
@@ -633,6 +667,18 @@ class InteractiveTuner:
                 self.ax_pressure_pr.axvline(x=initial_search_time, color=color, linestyle=':', lw=2, label=f'Start {label_prefix}')
                 if settling_time_pr is not None:
                     self.ax_pressure_pr.axvline(x=settling_time_pr, color=color, linestyle='--', lw=2, label=f'Settle {label_prefix}')
+
+                # Add text annotations for time and pressure
+                start_idx = (self.df['time'] - initial_search_time).abs().idxmin()
+                pressure_at_start = pr_filtered.at[start_idx]
+                time_at_start = self.df.at[start_idx, 'time']
+                self.ax_pressure_pr.text(time_at_start, pressure_at_start, f' ({time_at_start:.1f}s, {pressure_at_start:.1f})', color=color, ha='left', va='bottom', fontsize=9)
+
+                if settling_time_pr is not None:
+                    settle_idx = (self.df['time'] - settling_time_pr).abs().idxmin()
+                    pressure_at_settle = pr_filtered.at[settle_idx]
+                    time_at_settle = self.df.at[settle_idx, 'time']
+                    self.ax_pressure_pr.text(time_at_settle, pressure_at_settle, f' ({time_at_settle:.1f}s, {pressure_at_settle:.1f})', color=color, ha='left', va='top', fontsize=9)
 
                 self.ax_theta_g_t_pr.axvline(x=initial_search_time, color=color, linestyle=':', lw=2)
                 if settling_time_pr is not None:
@@ -819,7 +865,7 @@ class InteractiveTuner:
         _toggle_win(self.pr_final_pressure_fig, final_pressure_vis_pr)
 
     def toggle_filters(self, label):
-        self.use_median_filter, self.use_ema_filter = self.check_filters.get_status()
+        self.use_median_filter, self.use_ema_filter, self.use_pressure_offset = self.check_filters.get_status()
         self.recalculate_and_plot()
 
     def update_filter_params(self, val):
@@ -884,12 +930,32 @@ class InteractiveTuner:
         self.use_slope_filter = self.check_slope_filter.get_status()[0]
         self.recalculate_and_plot()
 
+    def toggle_auto_theta(self, label):
+        self.auto_set_theta_g = self.check_auto_theta.get_status()[0]
+        if self.auto_set_theta_g:
+            # When enabling, re-parse filename and update textbox and plots
+            match = re.search(r'(\d+\.\d+)', self.current_filename)
+            default_target = 0.3
+            if match:
+                try:
+                    self.target_theta_g_list = [float(match.group(1))]
+                    print(f"Auto-set target_theta_g from filename to: {self.target_theta_g_list}")
+                except (ValueError, IndexError):
+                    self.target_theta_g_list = [default_target]
+                    print(f"Could not parse float from filename. Defaulting target_theta_g to: {[default_target]}")
+            else:
+                self.target_theta_g_list = [default_target]
+                print(f"Filename does not contain a float. Defaulting target_theta_g to: {[default_target]}")
+
+            self.text_target_theta.set_val(', '.join(map(str, self.target_theta_g_list)))
+            self.run_auto_initial_time_detection()
+
     def run_auto_initial_time_detection(self):
         self.analysis_targets = []
         for target_g in self.target_theta_g_list:
             # Find the time when theta_g is closest to the target value.
-            closest_idx = self.df[col_theta_g].sub(target_g).abs().idxmin()
-            t_target_center = self.df.loc[closest_idx]['time']
+            closest_idx = (self.df[col_theta_g] - target_g).abs().idxmin()
+            t_target_center = self.df.at[closest_idx, 'time']
 
             # Define the search window of [-200, +200] seconds
             search_start = max(0, t_target_center - 200)
@@ -942,20 +1008,21 @@ class InteractiveTuner:
         self.df = df
 
         # --- Parse filename for target_theta_g ---
-        match = re.search(r'(\d+\.\d+)', self.current_filename)
-        default_target = 0.3
-        if match:
-            try:
-                self.target_theta_g_list = [float(match.group(1))]
-                print(f"Auto-set target_theta_g from filename to: {self.target_theta_g_list}")
-            except (ValueError, IndexError):
+        if self.auto_set_theta_g:
+            match = re.search(r'(\d+\.\d+)', self.current_filename)
+            default_target = 0.3
+            if match:
+                try:
+                    self.target_theta_g_list = [float(match.group(1))]
+                    print(f"Auto-set target_theta_g from filename to: {self.target_theta_g_list}")
+                except (ValueError, IndexError):
+                    self.target_theta_g_list = [default_target]
+                    print(f"Could not parse float from filename. Defaulting target_theta_g to: {[default_target]}")
+            else:
                 self.target_theta_g_list = [default_target]
-                print(f"Could not parse float from filename. Defaulting target_theta_g to: {[default_target]}")
-        else:
-            self.target_theta_g_list = [default_target]
-            print(f"Filename does not contain a float. Defaulting target_theta_g to: {[default_target]}")
+                print(f"Filename does not contain a float. Defaulting target_theta_g to: {[default_target]}")
 
-        self.text_target_theta.set_val(', '.join(map(str, self.target_theta_g_list)))
+            self.text_target_theta.set_val(', '.join(map(str, self.target_theta_g_list)))
 
         self.run_auto_initial_time_detection()
 

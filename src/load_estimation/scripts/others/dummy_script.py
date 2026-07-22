@@ -9,11 +9,6 @@ class DummyNode(Node):
     def __init__(self):
         super().__init__('dummy_node')
 
-        a = [[1,2],[5,6]]
-        print(a)
-        print(a[0])
-        print(a[0][1])
-
 def main(args=None):
     rclpy.init(args=args)
     node = DummyNode()

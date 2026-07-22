@@ -45,15 +45,15 @@ class InteractiveTuner:
         self.theta_g_offset = -0.625
         self.toPa_base = 40 * 10**6 / (2**15 - 1)
         self.use_compensation = False
-        self.k1 = -694
-        self.k2 = -700
+        self.k1 = 700.0
+        self.k2 = -700.0
         self.use_fixed_a = False
         self.fixed_a_value = 0.4
         self.use_median_filter = True
         self.use_ema_filter = True
         self.use_pressure_offset = False
         self.ema_alpha = 0.001
-        self.median_window = 100
+        self.median_window = 100.0
         self.slope_time_interval = 0.1
         self.slope_threshold = 1.0
         self.use_slope_filter = True
@@ -62,6 +62,7 @@ class InteractiveTuner:
         self.settling_duration_req = 10.0
         self.duration_param = 3.0
         self.auto_set_theta_g = False
+        self.fill_common_targets = False
 
         # Multi-target attributes
         self.target_theta_g_list = []
@@ -89,9 +90,6 @@ class InteractiveTuner:
         self.acc_g_threshold_auto = ACC_THRESHOLD
 
         # --- Create Figure and Axes for plots---
-        self.fig, (self.ax1, self.ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
-        self.fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.94, wspace=0.08, hspace=0.2)
-
         # --- Create a new Figure for the time plot with an extra subplot for 'a' ---
         self.time_fig, (self.ax_time, self.ax_a) = plt.subplots(2, 1, num='Figure 2: Load & Geometry vs Time', figsize=(12, 8), sharex=True)
         self.time_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.94, wspace=0.08, hspace=0.2)
@@ -131,7 +129,7 @@ class InteractiveTuner:
         self.check_v_line_geom.on_clicked(self.toggle_max_gih_line)
         
         # --- Create a separate Figure for controls ---
-        self.control_fig = plt.figure("Tuning Panel", figsize=(7, 10.0))
+        self.control_fig = plt.figure("Tuning Panel", figsize=(7, 10.5))
         self.control_fig.subplots_adjust(left=0.05, right=0.95, top=0.98, bottom=0.02)
 
         # --- Create UI Controls in the new window, arranged top-to-bottom ---
@@ -148,7 +146,7 @@ class InteractiveTuner:
         h_widget = 0.028
         h_checkbox = 0.028
         h_checkbox_double = h_checkbox * 2
-        h_checkbox_triple = h_checkbox * 3 + 0.01
+        h_checkbox_triple = h_checkbox * 3
 
         # Gaps
         v_gap_widget = 0.008
@@ -156,8 +154,8 @@ class InteractiveTuner:
         h_gap_widget = 0.03
 
         # Proportions for common layouts
-        prop_checkbox = 0.25
-        prop_slider = 1.0 - prop_checkbox - h_gap_widget
+        prop_checkbox = 0.35
+        prop_widget = 1.0 - prop_checkbox - h_gap_widget
         prop_half = 0.5 - h_gap_widget / 2
 
         # --- Layout Helper Function ---
@@ -169,7 +167,7 @@ class InteractiveTuner:
 
         # --- Section 1: File & View ---
         add_section_title('File & View Controls')
-        num_fig_checks = 7
+        num_fig_checks = 6
         row_h = h_checkbox * num_fig_checks + 0.01
         y_cursor -= row_h
         ax_select_btn = self.control_fig.add_axes([left_margin, y_cursor + row_h - h_widget, content_width * 0.4, h_widget])
@@ -180,58 +178,62 @@ class InteractiveTuner:
         add_section_title('Pressure Signal Filtering')
         row_h = h_checkbox_triple
         y_cursor -= row_h
-        slider_x = left_margin + content_width * prop_checkbox + h_gap_widget
-        slider_w = content_width * prop_slider
+        widget_x = left_margin + content_width * prop_checkbox + h_gap_widget
+        widget_w = content_width * prop_widget
         ax_filter_checks = self.control_fig.add_axes([left_margin, y_cursor, content_width * prop_checkbox, row_h])
-        ax_median_win = self.control_fig.add_axes([slider_x, y_cursor + h_widget * 2, slider_w, h_widget])
-        ax_ema_alpha = self.control_fig.add_axes([slider_x, y_cursor + h_widget, slider_w, h_widget])
+        ax_median_win = self.control_fig.add_axes([widget_x, y_cursor + h_widget * 2, widget_w, h_widget])
+        ax_ema_alpha = self.control_fig.add_axes([widget_x, y_cursor + h_widget, widget_w, h_widget])
         y_cursor -= v_gap_widget
 
+        w_half = content_width * prop_half
         y_cursor -= h_widget
-        ax_sensor_scale = self.control_fig.add_axes([left_margin, y_cursor, content_width * 0.5, h_widget])
-        y_cursor -= v_gap_widget
-
-        y_cursor -= h_widget
-        ax_theta_g_offset = self.control_fig.add_axes([left_margin, y_cursor, content_width * 0.5, h_widget])
+        ax_sensor_scale = self.control_fig.add_axes([left_margin, y_cursor, w_half, h_widget])
+        ax_theta_g_offset = self.control_fig.add_axes([left_margin + w_half + h_gap_widget, y_cursor, w_half, h_widget])
         y_cursor -= v_gap_widget
 
         # --- Section 3: Load Model Compensation ---
         add_section_title('Load Model Compensation')
-        y_cursor -= row_h; ax_check_comp1 = self.control_fig.add_axes([left_margin, y_cursor, content_width * prop_checkbox, row_h]); ax_k1 = self.control_fig.add_axes([slider_x, y_cursor, slider_w, h_widget]); y_cursor -= v_gap_widget
-        y_cursor -= h_widget; ax_k2 = self.control_fig.add_axes([slider_x, y_cursor, slider_w, h_widget]); y_cursor -= v_gap_widget
+        row_h = h_checkbox_double
+        y_cursor -= row_h
+        ax_check_comp1 = self.control_fig.add_axes([left_margin, y_cursor, content_width * prop_checkbox, row_h])
+        ax_k1 = self.control_fig.add_axes([widget_x, y_cursor + h_widget, widget_w, h_widget])
+        ax_k2 = self.control_fig.add_axes([widget_x, y_cursor, widget_w, h_widget])
+        y_cursor -= v_gap_widget
 
         # --- Section 4: Settling Time Analysis ---
         add_section_title('Settling Time Analysis')
         
-        y_cursor -= row_h
-        ax_check_auto_theta = self.control_fig.add_axes([left_margin, y_cursor, content_width * 0.5, row_h])
+        y_cursor -= h_checkbox
+        ax_check_auto_theta = self.control_fig.add_axes([left_margin, y_cursor, content_width, h_checkbox])
         y_cursor -= v_gap_widget
 
-
-        y_cursor -= h_widget
-        textbox_x = left_margin + content_width * 0.1
-        textbox_w = content_width * (prop_half - 0.1)
-        ax_target_theta = self.control_fig.add_axes([textbox_x, y_cursor, textbox_w, h_widget])
-        ax_theta_thresh = self.control_fig.add_axes([textbox_x + textbox_w + h_gap_widget, y_cursor, textbox_w, h_widget])
+        y_cursor -= h_checkbox
+        ax_fill_targets = self.control_fig.add_axes([left_margin, y_cursor, content_width, h_checkbox])
         y_cursor -= v_gap_widget
 
         y_cursor -= h_widget
-        ax_vel_thresh_auto = self.control_fig.add_axes([textbox_x, y_cursor, textbox_w, h_widget])
-        ax_acc_thresh_auto = self.control_fig.add_axes([textbox_x + textbox_w + h_gap_widget, y_cursor, textbox_w, h_widget])
+        ax_target_theta = self.control_fig.add_axes([left_margin, y_cursor, content_width, h_widget])
         y_cursor -= v_gap_widget
 
         y_cursor -= h_widget
-        ax_settling_dur_req = self.control_fig.add_axes([textbox_x, y_cursor, textbox_w, h_widget])
+        ax_theta_thresh = self.control_fig.add_axes([left_margin, y_cursor, w_half, h_widget])
+        ax_settling_dur_req = self.control_fig.add_axes([left_margin + w_half + h_gap_widget, y_cursor, w_half, h_widget])
         y_cursor -= v_gap_widget
 
-
-        y_cursor -= row_h
-        ax_check_slope_filter = self.control_fig.add_axes([left_margin, y_cursor, content_width * prop_checkbox, row_h])
-        ax_slope_ema_alpha = self.control_fig.add_axes([slider_x, y_cursor, slider_w, h_widget])
+        y_cursor -= h_widget
+        ax_vel_thresh_auto = self.control_fig.add_axes([left_margin, y_cursor, w_half, h_widget])
+        ax_acc_thresh_auto = self.control_fig.add_axes([left_margin + w_half + h_gap_widget, y_cursor, w_half, h_widget])
         y_cursor -= v_gap_widget
 
-        y_cursor -= h_widget; ax_slope_interval = self.control_fig.add_axes([slider_x, y_cursor, slider_w, h_widget]); y_cursor -= v_gap_widget
-        y_cursor -= h_widget; ax_slope_thresh = self.control_fig.add_axes([slider_x, y_cursor, slider_w, h_widget]); y_cursor -= v_gap_widget
+        y_cursor -= h_checkbox
+        ax_check_slope_filter = self.control_fig.add_axes([left_margin, y_cursor, prop_checkbox, h_checkbox])
+        ax_slope_ema_alpha = self.control_fig.add_axes([widget_x, y_cursor, widget_w, h_widget])
+        y_cursor -= v_gap_widget
+
+        y_cursor -= h_widget
+        ax_slope_interval = self.control_fig.add_axes([left_margin, y_cursor, w_half, h_widget])
+        ax_slope_thresh = self.control_fig.add_axes([left_margin + w_half + h_gap_widget, y_cursor, w_half, h_widget])
+        y_cursor -= v_gap_widget
 
         # --- Section 5: Final Pressure Analysis ---
         add_section_title('Final Pressure Analysis')
@@ -245,12 +247,12 @@ class InteractiveTuner:
         # --- Instantiate Widgets (in section order) ---
         # Section 1: File & View
         self.btn_select_file = Button(ax_select_btn, 'Select CSV File')
-        self.check_figs = CheckButtons(ax_fig_vis, ['Load(θg)', 'Load(t)', 'Pressure(t) pb', 'Final Pressure pb', 'Pressure(t) pr', 'Geometry', 'Final Pressure pr'], actives=[False, False, False, False, False, False, False])
+        self.check_figs = CheckButtons(ax_fig_vis, ['Load(t)', 'Pressure(t) pb', 'Final Pressure pb', 'Pressure(t) pr', 'Geometry', 'Final Pressure pr'], actives=[False, False, False, False, False, False])
 
         # Section 2: Signal Filtering
         self.check_filters = CheckButtons(ax_filter_checks, ['Median', 'EMA', 'Offset'], actives=[self.use_median_filter, self.use_ema_filter, self.use_pressure_offset])
-        self.slider_median_win = Slider(ax_median_win, 'Median Win', 51, 201, valinit=self.median_window, valstep=10)
-        self.slider_ema_alpha = Slider(ax_ema_alpha, 'EMA Alpha', 0.001, 0.01, valinit=self.ema_alpha, valstep=0.001)
+        self.text_median_win = TextBox(ax_median_win, 'Median Win', initial=str(self.median_window))
+        self.text_ema_alpha = TextBox(ax_ema_alpha, 'EMA Alpha', initial=str(self.ema_alpha))
         self.text_sensor_scale = TextBox(ax_sensor_scale, 'Sensor Scale', initial=str(self.sensor_scale_factor))
         self.text_theta_g_offset = TextBox(ax_theta_g_offset, 'θg Offset (rad)', initial=str(self.theta_g_offset))
 
@@ -261,6 +263,7 @@ class InteractiveTuner:
 
         # Section 4: Settling Time Analysis
         self.check_auto_theta = CheckButtons(ax_check_auto_theta, ['Auto-set θg from filename'], [self.auto_set_theta_g])
+        self.check_fill_targets = CheckButtons(ax_fill_targets, ['Fill Common Targets'], [self.fill_common_targets])
         self.text_target_theta = TextBox(ax_target_theta, 'Target θg (csv)', initial=', '.join(map(str, self.target_theta_g_list)))
         self.text_theta_thresh = TextBox(ax_theta_thresh, 'θg Thresh', initial=str(self.theta_g_threshold))
         self.text_vel_thresh = TextBox(ax_vel_thresh_auto, 'Vel Thresh', initial=str(self.vel_g_threshold_auto))
@@ -268,8 +271,8 @@ class InteractiveTuner:
         self.text_settling_dur_req = TextBox(ax_settling_dur_req, 'Stable Dur (s)', initial=str(self.settling_duration_req))
         self.check_slope_filter = CheckButtons(ax_check_slope_filter, ['Filter Slope (EMA)'], [self.use_slope_filter])
         self.text_slope_ema_alpha = TextBox(ax_slope_ema_alpha, 'Slope EMA α', initial=str(self.slope_ema_alpha))
-        self.slider_slope_interval = Slider(ax_slope_interval, 'Slope Interval (s)', 0.1, 5.0, valinit=self.slope_time_interval, valstep=0.1)
-        self.slider_slope_thresh = Slider(ax_slope_thresh, 'Slope Thresh', 0.0, 50.0, valinit=self.slope_threshold, valstep=1.0)
+        self.text_slope_interval = TextBox(ax_slope_interval, 'Slope Interval (s)', initial=str(self.slope_time_interval))
+        self.text_slope_thresh = TextBox(ax_slope_thresh, 'Slope Thresh', initial=str(self.slope_threshold))
 
         # Section 5: Final Pressure Analysis
         self.text_ts_param = TextBox(ax_ts_param, 'Ts (sec)', initial=str(self.ts_param))
@@ -282,11 +285,12 @@ class InteractiveTuner:
         self.check_comp.on_clicked(self.toggle_compensation)
         self.check_figs.on_clicked(self.toggle_figure_visibility)
         self.check_filters.on_clicked(self.toggle_filters)
-        self.slider_ema_alpha.on_changed(self.update_filter_params)
-        self.slider_median_win.on_changed(self.update_filter_params)
-        self.slider_slope_interval.on_changed(self.update_slope_params)
-        self.slider_slope_thresh.on_changed(self.update_settling_params)
+        self.text_ema_alpha.on_submit(self.update_filter_params)
+        self.text_median_win.on_submit(self.update_filter_params)
+        self.text_slope_interval.on_submit(self.update_slope_params)
+        self.text_slope_thresh.on_submit(self.update_settling_params)
         self.check_auto_theta.on_clicked(self.toggle_auto_theta)
+        self.check_fill_targets.on_clicked(self.toggle_fill_targets)
         self.text_target_theta.on_submit(self.update_auto_time_params)
         self.text_theta_thresh.on_submit(self.update_auto_time_params)
         self.text_vel_thresh.on_submit(self.update_auto_time_params)
@@ -405,14 +409,7 @@ class InteractiveTuner:
         if self.use_slope_filter:
             slope_to_analyze_pr = slope_to_analyze_pr.ewm(alpha=self.slope_ema_alpha, adjust=False).mean()
 
-        static_df = self.df[
-            (self.df[col_vel_g].abs() < VEL_THRESHOLD) &
-            (self.df[col_acc_g].abs() < ACC_THRESHOLD)
-        ].copy()
-
         # --- Clear and Redraw Plots ---
-        self.ax1.clear()
-        self.ax2.clear()
         self.ax_time.clear()
         self.ax_a.clear()
         self.ax_a2.clear()
@@ -563,45 +560,6 @@ class InteractiveTuner:
                 'r_squared_pr': r_squared_pr,
                 'color': color
             })
-
-        # Update the main plot window's title
-        self.fig.suptitle(f'Load Estimation Analysis for "{self.current_filename}"', fontsize=16)
-        # --- Subplot 1: All Data ---
-        self.ax1.scatter(theta_g, self.df[col_w_calculated], alpha=0.6, s=10)
-        self.ax1.set_title('All Data Points')
-        self.ax1.set_ylabel('Estimated Mass (w) [kg]')
-        self.ax1.grid(True)
-
-        # --- Subplot 2: Static Data Only ---
-        if not static_df.empty:
-            # --- Stats for w calculated by this script ---
-            w_calc_series = static_df[col_w_calculated]
-            avg_w_calc = w_calc_series.mean()
-            std_w_calc = w_calc_series.std()
-
-            stats_text = (f'Live Calc -> Avg: {avg_w_calc:.1f}, Std: {std_w_calc:.1f}')
-
-            # Plot w calculated by this script
-            self.ax2.scatter(theta_g[static_df.index], w_calc_series, alpha=0.5, s=15,
-                             color='green', marker='o', label='w (Live Calc)')
-
-            # Add lines for actual load and averages
-            # The 'Actual Load' line has been removed as it was tied to the hardcoded file list.
-            self.ax2.axhline(y=avg_w_calc, color='green', linestyle='--', linewidth=2, label=f'Live Calc Avg: {avg_w_calc:.1f} kg')
-
-            # Add a shaded region for the standard deviation of the live calculation
-            self.ax2.axhspan(avg_w_calc - std_w_calc, avg_w_calc + std_w_calc, color='green', alpha=0.15, label=f'Live Calc Std Dev')
-            self.ax2.set_title(f'Static Data: Live Calculation\n{stats_text}')
-            self.ax2.legend(fontsize='small')
-        else:
-            self.ax2.set_title('No Static Data Found for Estimated Mass')
-            self.ax2.text(0.5, 0.5, 'No data points met the static criteria.',
-                     horizontalalignment='center', verticalalignment='center',
-                     transform=self.ax2.transAxes)
-
-
-        self.ax2.set_ylabel('Estimated Mass (w) [kg]')
-        self.ax2.grid(True)
 
         # --- Plot for Pressure Analysis in a separate window ---
         self.pressure_fig.suptitle(f'Figure 3: Pressure Analysis (pb) for "{self.current_filename}"')
@@ -796,7 +754,16 @@ class InteractiveTuner:
 
             # --- "Time-Varying Pressure" line ---
             if not plot_df.empty:
-                self.ax_time.plot(plot_df['time'], plot_df[col_w_calculated], label='Est. Mass (Time-Varying Pressure)')
+                w_est_series = plot_df[col_w_calculated]
+                avg_w_est = w_est_series.mean()
+                std_w_est = w_est_series.std()
+                stats_text = f'Avg: {avg_w_est:.1f} kg, Std Dev: {std_w_est:.1f} kg'
+                self.ax_time.set_title(f'Estimated Load vs. Time (from static start)\n{stats_text}')
+
+                self.ax_time.plot(plot_df['time'], w_est_series, label='Est. Mass (Time-Varying Pressure)')
+            else:
+                self.ax_time.set_title('Estimated Load vs. Time (from static start)')
+
 
             # --- Discontinuous "Predicted Settle Pressure" lines ---
             for i, res in enumerate(self.final_pressure_results):
@@ -825,7 +792,6 @@ class InteractiveTuner:
 
             self.ax_time.legend()
             self.ax_time.grid(True)
-            self.ax_time.set_title('Estimated Load vs. Time (from static start)')
             self.ax_time.set_ylabel('Estimated Mass (w) [kg]')
 
             # --- Plot for Geometry Factor 'a' and theta_g ---
@@ -941,7 +907,6 @@ class InteractiveTuner:
 
         self.time_fig.canvas.draw_idle()
         self.pressure_fig.canvas.draw_idle()
-        self.fig.canvas.draw_idle()
         self.final_pressure_fig.canvas.draw_idle()
         self.pr_pressure_fig.canvas.draw_idle()
         self.pr_final_pressure_fig.canvas.draw_idle()
@@ -981,18 +946,17 @@ class InteractiveTuner:
         without closing them, which is cleaner than closing and recreating figures.
         It may not work with other matplotlib backends.
         """
-        main_vis, time_vis, pressure_vis_pb, final_pressure_vis_pb, pressure_vis_pr, geom_vis, final_pressure_vis_pr = self.check_figs.get_status()
+        time_vis, pressure_vis_pb, final_pressure_vis_pb, pressure_vis_pr, geom_vis, final_pressure_vis_pr = self.check_figs.get_status()
 
         def _toggle_win(fig, is_visible):
             """Helper to safely toggle a window's visibility."""
             manager = getattr(fig.canvas, 'manager', None)
             if manager and hasattr(manager, 'window') and manager.window:
                 if is_visible:
-                    manager.window.deiconify()
+                    manager.window.deiconify() # type: ignore
                 else:
-                    manager.window.withdraw()
+                    manager.window.withdraw() # type: ignore
 
-        _toggle_win(self.fig, main_vis)
         _toggle_win(self.time_fig, time_vis)
         _toggle_win(self.pressure_fig, pressure_vis_pb)
         _toggle_win(self.final_pressure_fig, final_pressure_vis_pb)
@@ -1004,9 +968,15 @@ class InteractiveTuner:
         self.use_median_filter, self.use_ema_filter, self.use_pressure_offset = self.check_filters.get_status()
         self.recalculate_and_plot()
 
-    def update_filter_params(self, val):
-        self.ema_alpha = self.slider_ema_alpha.val
-        self.median_window = self.slider_median_win.val
+    def update_filter_params(self, text):
+        try:
+            self.ema_alpha = float(self.text_ema_alpha.text)
+            self.median_window = float(self.text_median_win.text)
+        except ValueError:
+            print(f"Invalid input for filter params. Please enter valid numbers.")
+            self.text_ema_alpha.set_val(str(self.ema_alpha))
+            self.text_median_win.set_val(str(self.median_window))
+            return
         self.recalculate_and_plot()
 
     def update_sensor_scale_factor(self, text):
@@ -1043,19 +1013,25 @@ class InteractiveTuner:
             return
         self.recalculate_and_plot()
 
-    def update_slope_params(self, val):
-        self.slope_time_interval = self.slider_slope_interval.val
+    def update_slope_params(self, text):
+        try:
+            self.slope_time_interval = float(self.text_slope_interval.text)
+        except ValueError:
+            print(f"Invalid input for Slope Interval: '{text}'. Please enter a valid number.")
+            self.text_slope_interval.set_val(str(self.slope_time_interval))
+            return
         self.recalculate_and_plot()
 
     def update_settling_params(self, text_or_val):
         # This handler is called by both the slider and the textbox
-        self.slope_threshold = self.slider_slope_thresh.val
         try:
+            self.slope_threshold = float(self.text_slope_thresh.text)
             self.settling_duration_req = float(self.text_settling_dur_req.text)
         except ValueError:
-            print(f"Invalid input for Stable Duration: '{self.text_settling_dur_req.text}'. Please enter a valid number.")
+            print(f"Invalid input for Stable Duration or Slope Threshold. Please enter valid numbers.")
             self.text_settling_dur_req.set_val(str(self.settling_duration_req))
-
+            self.text_slope_thresh.set_val(str(self.slope_threshold))
+            return
         self.recalculate_and_plot()
 
     def update_auto_time_params(self, text):
@@ -1074,6 +1050,14 @@ class InteractiveTuner:
     def toggle_slope_filter(self, label):
         self.use_slope_filter = self.check_slope_filter.get_status()[0]
         self.recalculate_and_plot()
+
+    def toggle_fill_targets(self, label):
+        self.fill_common_targets = self.check_fill_targets.get_status()[0]
+        if self.fill_common_targets:
+            common_targets = "0.7,0.6,0.5,0.4,0.3,0.2,0.1"
+            self.text_target_theta.set_val(common_targets)
+            # Manually trigger the update
+            self.update_auto_time_params(common_targets)
 
     def toggle_auto_theta(self, label):
         self.auto_set_theta_g = self.check_auto_theta.get_status()[0]

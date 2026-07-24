@@ -42,25 +42,25 @@ class InteractiveTuner:
         self.df = df.copy()
         self.current_filename = current_filename
         self.sensor_scale_factor = 1.0
-        self.theta_g_offset = -0.625
+        self.theta_g_offset = -0.62
         self.toPa_base = 40 * 10**6 / (2**15 - 1)
-        self.use_compensation = False
-        self.k1 = 700.0
-        self.k2 = -700.0
+        self.use_compensation = True
+        self.k1 = 900.0
+        self.k2 = -550
         self.use_fixed_a = False
         self.fixed_a_value = 0.4
         self.use_median_filter = True
         self.use_ema_filter = True
-        self.use_pressure_offset = False
+        self.use_pressure_offset = True
         self.ema_alpha = 0.001
         self.median_window = 100.0
         self.slope_time_interval = 0.1
         self.slope_threshold = 1.0
         self.use_slope_filter = True
         self.slope_ema_alpha = 0.001
-        self.ts_param = 65.0
+        self.ts_param = 60.0
         self.settling_duration_req = 10.0
-        self.duration_param = 3.0
+        self.duration_param = 1.0
         self.auto_set_theta_g = False
         self.fill_common_targets = False
 
@@ -92,7 +92,7 @@ class InteractiveTuner:
         # --- Create Figure and Axes for plots---
         # --- Create a new Figure for the time plot with an extra subplot for 'a' ---
         self.time_fig, (self.ax_time, self.ax_a) = plt.subplots(2, 1, num='Figure 2: Load & Geometry vs Time', figsize=(12, 8), sharex=True)
-        self.time_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.94, wspace=0.08, hspace=0.2)
+        self.time_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.85, wspace=0.08, hspace=0.2)
         self.ax_a2 = self.ax_a.twinx()
 
         # --- Create a new Figure for pressure analysis ---
@@ -101,11 +101,11 @@ class InteractiveTuner:
         self.ax_pressure_pb = self.pressure_fig.add_subplot(gs[0, 0])
         self.ax_theta_g_t = self.pressure_fig.add_subplot(gs[0, 1], sharex=self.ax_pressure_pb)
         self.ax_slope_pb = self.pressure_fig.add_subplot(gs[1, :], sharex=self.ax_pressure_pb)
-        self.pressure_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.94, wspace=0.08, hspace=0.2)
+        self.pressure_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.90, wspace=0.08, hspace=0.2)
 
         # --- Create a new Figure for final pressure analysis ---
         self.final_pressure_fig, self.ax_final_pressure = plt.subplots(num='Figure 4: Final Pressure (pb)', figsize=(12, 8))
-        self.final_pressure_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.94, wspace=0.08, hspace=0.2)
+        self.final_pressure_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.90, wspace=0.08, hspace=0.2)
 
         # --- Create a new Figure for pr pressure analysis ---
         self.pr_pressure_fig = plt.figure(num='Figure 5: Pressure Analysis (pr)', figsize=(12, 8))
@@ -113,18 +113,18 @@ class InteractiveTuner:
         self.ax_pressure_pr = self.pr_pressure_fig.add_subplot(gs_pr[0, 0])
         self.ax_theta_g_t_pr = self.pr_pressure_fig.add_subplot(gs_pr[0, 1], sharex=self.ax_pressure_pr)
         self.ax_slope_pr = self.pr_pressure_fig.add_subplot(gs_pr[1, :], sharex=self.ax_pressure_pr)
-        self.pr_pressure_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.94, wspace=0.08, hspace=0.2)
+        self.pr_pressure_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.90, wspace=0.08, hspace=0.2)
 
         # --- Create a new Figure for pr final pressure analysis ---
         self.pr_final_pressure_fig, self.ax_pr_final_pressure = plt.subplots(num='Figure 7: Final Pressure (pr)', figsize=(12, 8))
-        self.pr_final_pressure_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.94, wspace=0.08, hspace=0.2)
+        self.pr_final_pressure_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.90, wspace=0.08, hspace=0.2)
 
         # --- Create a new Figure for Geometry ---
         self.geometry_fig, (self.ax_lih, self.ax_gih, self.ax_hio, self.ax_a_geom, self.ax_theta_g_geom) = plt.subplots(5, 1, num='Figure 6: Geometry', figsize=(10, 14), sharex=True)
         self.geometry_fig.subplots_adjust(left=0.1, bottom=0.05, right=0.95, top=0.92, hspace=0.4)
 
         # Add CheckButtons for the vertical line
-        ax_check_v_line = self.geometry_fig.add_axes([0.75, 0.94, 0.2, 0.05]) # [left, bottom, width, height]
+        ax_check_v_line = self.geometry_fig.add_axes([0.75, 0.90, 0.2, 0.05]) # [left, bottom, width, height]
         self.check_v_line_geom = CheckButtons(ax_check_v_line, ['Show Max GIH'], actives=[True])
         self.check_v_line_geom.on_clicked(self.toggle_max_gih_line)
         
@@ -752,20 +752,35 @@ class InteractiveTuner:
             else:
                 plot_df = self.df.copy()
 
+            stats_text = ""
             # --- "Time-Varying Pressure" line ---
             if not plot_df.empty:
                 w_est_series = plot_df[col_w_calculated]
-                avg_w_est = w_est_series.mean()
-                std_w_est = w_est_series.std()
-                stats_text = f'Avg: {avg_w_est:.1f} kg, Std Dev: {std_w_est:.1f} kg'
-                self.ax_time.set_title(f'Estimated Load vs. Time (from static start)\n{stats_text}')
+                avg_w_est = w_est_series.mean() # Overall average
 
+                # --- Calculate Average Standard Deviation across segments ---
+                segment_stds = []
+                if self.analysis_targets:
+                    for i, target_info in enumerate(self.analysis_targets):
+                        start_time = target_info['initial_search_time']
+                        # Define end time as start of next target, or end of data for the last target
+                        end_time = self.analysis_targets[i+1]['initial_search_time'] if i + 1 < len(self.analysis_targets) else self.df['time'].iloc[-1]
+                        
+                        segment_mask = (plot_df['time'] >= start_time) & (plot_df['time'] < end_time)
+                        segment_w_series = w_est_series[segment_mask]
+                        if len(segment_w_series) > 1:
+                            segment_stds.append(segment_w_series.std())
+
+                if segment_stds:
+                    avg_std_w_est = np.mean(segment_stds)
+                else:
+                    avg_std_w_est = w_est_series.std() # Fallback to overall std if no segments or targets
+
+                stats_text = f'Time-Varying -> Avg: {avg_w_est:.1f} kg, Avg Std Dev: {avg_std_w_est:.1f} kg'
                 self.ax_time.plot(plot_df['time'], w_est_series, label='Est. Mass (Time-Varying Pressure)')
-            else:
-                self.ax_time.set_title('Estimated Load vs. Time (from static start)')
-
 
             # --- Discontinuous "Predicted Settle Pressure" lines ---
+            target_mass_values = []
             for i, res in enumerate(self.final_pressure_results):
                 median_pbf = res.get('median_pbf')
                 median_prf = res.get('median_prf')
@@ -785,10 +800,25 @@ class InteractiveTuner:
                 Fc_new = 2 * (Ab * median_pbf - Ar * median_prf) * toPa
                 w_predicted = self.calculate_mass(theta_g.loc[segment_df.index], Fc_new)
                 mass_at_start = w_predicted.iloc[0]
+                target_mass_values.append(mass_at_start)
 
                 self.ax_time.plot(segment_df['time'], w_predicted,
                                   label=f'Est. Mass (Tgt {res["target_g"]:.2f}) ({mass_at_start:.1f} kg)',
                                   linestyle='--', color=res['color'])
+
+            # --- Finalize Title with all stats ---
+            target_stats_text = ""
+            if len(target_mass_values) > 1:
+                avg_target_mass = np.mean(target_mass_values)
+                std_target_mass = np.std(target_mass_values)
+                target_stats_text = f'Est. Mass (Tgt) -> Avg: {avg_target_mass:.1f} kg, Std: {std_target_mass:.1f} kg'
+
+            title_lines = ['Estimated Load vs. Time (from static start)']
+            if stats_text:
+                title_lines.append(stats_text)
+            if target_stats_text:
+                title_lines.append(target_stats_text)
+            self.ax_time.set_title('\n'.join(title_lines))
 
             self.ax_time.legend()
             self.ax_time.grid(True)

@@ -6,7 +6,6 @@ from std_srvs.srv import Trigger
 from std_msgs.msg import Float64MultiArray
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
-from collections import deque
 import numpy as np
 
 
@@ -34,18 +33,13 @@ class LoadEstimationNode(Node):
         self.IGO = np.pi - (np.arctan2(LgiY, LgiX))
 
         # compensator
-        self.k1 = -1.3564       # ton
-        self.k2 = 1.0652e-03    
-        self.k3 = 1.0077        # ton/rad
+        self.k1 = -0.2118           # ton
+        self.k2 = 1.0545e-03    
+        self.k3 = 4.6246e-01        # ton/rad
 
         # pressure predict model
         self.duration = 1.0
         self.ts = 60.0 
-
-        # median filter
-        self.window_size = 80
-        self.r_history = deque(maxlen=self.window_size)
-        self.b_history = deque(maxlen=self.window_size)
 
         # EMA filter (cutoff freq: 0.016Hz)
         self.ema_alpha = 0.001
@@ -94,28 +88,21 @@ class LoadEstimationNode(Node):
         
         self.theta_a = self.theta_a_ema_filtered
 
-    def pressure_callback(self, msg:Float64MultiArray):
+    def pressure_callback(self, msg: Float64MultiArray):
         pb_raw = msg.data[0]
         pr_raw = msg.data[1]
-        self.b_history.append(pb_raw)
-        self.r_history.append(pr_raw) 
-        
-        if len(self.b_history) < self.window_size:
-            self.pb_filter = None
-            self.pr_filter = None
-            return
-        
-        # median filter
-        pb_median = np.median(list(self.b_history))
-        pr_median = np.median(list(self.r_history))
 
-        # EMA filter to the median-filtered signal
+        # EMA filter for pb
         if self.pb_ema_filtered is None:
-            self.pb_ema_filtered = pb_median
-            self.pr_ema_filtered = pr_median
+            self.pb_ema_filtered = pb_raw
         else:
-            self.pb_ema_filtered = self.ema_alpha * pb_median + (1 - self.ema_alpha) * self.pb_ema_filtered
-            self.pr_ema_filtered = self.ema_alpha * pr_median + (1 - self.ema_alpha) * self.pr_ema_filtered
+            self.pb_ema_filtered = self.ema_alpha * pb_raw + (1 - self.ema_alpha) * self.pb_ema_filtered
+
+        # EMA filter for pr
+        if self.pr_ema_filtered is None:
+            self.pr_ema_filtered = pr_raw
+        else:
+            self.pr_ema_filtered = self.ema_alpha * pr_raw + (1 - self.ema_alpha) * self.pr_ema_filtered
 
         self.pb_filter = self.pb_ema_filtered
         self.pr_filter = self.pr_ema_filtered

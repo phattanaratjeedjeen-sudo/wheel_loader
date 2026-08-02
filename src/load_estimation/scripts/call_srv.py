@@ -10,8 +10,8 @@ class ServiceCallerNode(Node):
     def __init__(self):
         super().__init__('load_estimate_caller_node')
 
-        self.vel_threshold = 0.003
-        self.acc_threshold = 0.005
+        self.vel_threshold = 0.001
+        self.acc_threshold = 0.003
         self.theta_g_offset = -0.62
 
         # EMA filter for theta_g
@@ -87,7 +87,7 @@ class ServiceCallerNode(Node):
 
         if currently_static:
             if self.is_moving and not self.service_call_in_progress:
-                self.get_logger().info(f"static met: vel={self.vel_g:.4f}, acc={self.acc_g:.4f}). Call service")
+                self.get_logger().info(f"static met: vel={self.vel_g:.4f}, acc={self.acc_g:.4f}). Call service", throttle_duration_sec=5)
                 self.call_load_estimate_service()
                 self.is_moving = False
         else:  # is moving

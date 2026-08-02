@@ -14,3 +14,20 @@ when /load_estimate srv is called, do these step
 2.5.5 compensator
 and return estimated mass 
 note that after this srv returns response reset all variables. prepare for next time service call. 
+
+
+## V1
+load(p_raw, theta_g) = -0.2137 + 1.1263e-10 * w - 9.0591e-15 * theta_g + 3.0581e-07 * w**2 + 1.0801e-11 * w * theta_g - 7.0792e-15 * theta_g**2 - 3.0206e-11 * w**3 - 3.8707e-08 * w**2 * theta_g - 5.4011e-12 * w * theta_g**2 - 4.8058e-15 * theta_g**3
+
+load (tons)
+p_raw : pressure sensor value when offset empty bucket
+theta_g : encoder value (rad)
+
+R^2:   0.99548
+RMSE:  0.07640
+
+## V2
+load(w, theta_g) = -1.3248 + 1.0649e-03 * w + 9.7453e-01 * theta_g
+R^2:   0.99827
+RMSE:  0.04727
+

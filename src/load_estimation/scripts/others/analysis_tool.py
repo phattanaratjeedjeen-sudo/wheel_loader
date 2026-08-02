@@ -47,12 +47,13 @@ class InteractiveTuner:
         self.use_compensation = True
         self.k1 = 900.0
         self.k2 = -550
-        self.use_fixed_a = False
-        self.fixed_a_value = 0.4
+        self.use_surf_fit = False
         self.use_median_filter = True
         self.use_ema_filter = True
         self.use_pressure_offset = True
         self.ema_alpha = 0.001
+        self.use_theta_g_ema_filter = True
+        self.theta_g_ema_alpha = 0.1
         self.median_window = 100.0
         self.slope_time_interval = 0.1
         self.slope_threshold = 1.0
@@ -90,6 +91,10 @@ class InteractiveTuner:
         self.acc_g_threshold_auto = ACC_THRESHOLD
 
         # --- Create Figure and Axes for plots---
+        # --- Create a new Figure for Kinematics ---
+        self.kinematics_fig, (self.ax_kin_theta, self.ax_kin_vel, self.ax_kin_acc) = plt.subplots(3, 1, num='Figure 1: Kinematics Analysis', figsize=(12, 8), sharex=True)
+        self.kinematics_fig.subplots_adjust(left=0.08, bottom=0.05, right=0.95, top=0.90, hspace=0.3)
+
         # --- Create a new Figure for the time plot with an extra subplot for 'a' ---
         self.time_fig, (self.ax_time, self.ax_a) = plt.subplots(2, 1, num='Figure 2: Load & Geometry vs Time', figsize=(12, 8), sharex=True)
         self.time_fig.subplots_adjust(left=0.05, bottom=0.05, right=0.945, top=0.85, wspace=0.08, hspace=0.2)
@@ -167,11 +172,24 @@ class InteractiveTuner:
 
         # --- Section 1: File & View ---
         add_section_title('File & View Controls')
-        num_fig_checks = 6
-        row_h = h_checkbox * num_fig_checks + 0.01
-        y_cursor -= row_h
-        ax_select_btn = self.control_fig.add_axes([left_margin, y_cursor + row_h - h_widget, content_width * 0.4, h_widget])
-        ax_fig_vis = self.control_fig.add_axes([left_margin + content_width * 0.4 + h_gap_widget, y_cursor, content_width * 0.5, row_h])
+        
+        # Button on top
+        y_cursor -= h_widget
+        ax_select_btn = self.control_fig.add_axes([left_margin, y_cursor, content_width, h_widget])
+        y_cursor -= v_gap_widget
+
+        # Checkboxes below in two columns for a more compact view
+        fig_labels = ['Kinematics', 'Load(t)', 'Pressure(t) pb', 'Final Pressure pb', 'Pressure(t) pr', 'Geometry', 'Final Pressure pr']
+        num_figs_col1 = 4
+        self.fig_labels_col1 = fig_labels[:num_figs_col1]
+        self.fig_labels_col2 = fig_labels[num_figs_col1:]
+        
+        row_h_checks = h_checkbox * num_figs_col1
+        y_cursor -= row_h_checks
+        
+        w_half = content_width * prop_half
+        ax_fig_vis1 = self.control_fig.add_axes([left_margin, y_cursor, w_half, row_h_checks])
+        ax_fig_vis2 = self.control_fig.add_axes([left_margin + w_half + h_gap_widget, y_cursor, w_half, row_h_checks])
         y_cursor -= v_gap_widget
 
         # --- Section 2: Signal Filtering ---
@@ -183,6 +201,12 @@ class InteractiveTuner:
         ax_filter_checks = self.control_fig.add_axes([left_margin, y_cursor, content_width * prop_checkbox, row_h])
         ax_median_win = self.control_fig.add_axes([widget_x, y_cursor + h_widget * 2, widget_w, h_widget])
         ax_ema_alpha = self.control_fig.add_axes([widget_x, y_cursor + h_widget, widget_w, h_widget])
+        y_cursor -= v_gap_widget
+
+        # New widgets for theta_g EMA
+        y_cursor -= h_checkbox
+        ax_check_theta_g_filter = self.control_fig.add_axes([left_margin, y_cursor, prop_checkbox, h_checkbox])
+        ax_theta_g_ema_alpha = self.control_fig.add_axes([widget_x, y_cursor, widget_w, h_widget])
         y_cursor -= v_gap_widget
 
         w_half = content_width * prop_half
@@ -247,17 +271,20 @@ class InteractiveTuner:
         # --- Instantiate Widgets (in section order) ---
         # Section 1: File & View
         self.btn_select_file = Button(ax_select_btn, 'Select CSV File')
-        self.check_figs = CheckButtons(ax_fig_vis, ['Load(t)', 'Pressure(t) pb', 'Final Pressure pb', 'Pressure(t) pr', 'Geometry', 'Final Pressure pr'], actives=[False, False, False, False, False, False])
+        self.check_figs1 = CheckButtons(ax_fig_vis1, self.fig_labels_col1, actives=[False]*len(self.fig_labels_col1))
+        self.check_figs2 = CheckButtons(ax_fig_vis2, self.fig_labels_col2, actives=[False]*len(self.fig_labels_col2))
 
         # Section 2: Signal Filtering
         self.check_filters = CheckButtons(ax_filter_checks, ['Median', 'EMA', 'Offset'], actives=[self.use_median_filter, self.use_ema_filter, self.use_pressure_offset])
         self.text_median_win = TextBox(ax_median_win, 'Median Win', initial=str(self.median_window))
         self.text_ema_alpha = TextBox(ax_ema_alpha, 'EMA Alpha', initial=str(self.ema_alpha))
+        self.check_theta_g_filter = CheckButtons(ax_check_theta_g_filter, ['EMA on θg'], [self.use_theta_g_ema_filter])
+        self.text_theta_g_ema_alpha = TextBox(ax_theta_g_ema_alpha, 'θg EMA α', initial=str(self.theta_g_ema_alpha))
         self.text_sensor_scale = TextBox(ax_sensor_scale, 'Sensor Scale', initial=str(self.sensor_scale_factor))
         self.text_theta_g_offset = TextBox(ax_theta_g_offset, 'θg Offset (rad)', initial=str(self.theta_g_offset))
 
         # Section 3: Load Model Compensation
-        self.check_comp = CheckButtons(ax_check_comp1, ['Compensator 1', f'Fix a = {self.fixed_a_value}'], [self.use_compensation, self.use_fixed_a])
+        self.check_comp = CheckButtons(ax_check_comp1, ['Compensator 1', 'Surf Fit'], [self.use_compensation, self.use_surf_fit])
         self.text_k1 = TextBox(ax_k1, 'k1', initial=str(self.k1))
         self.text_k2 = TextBox(ax_k2, 'k2', initial=str(self.k2))
 
@@ -283,9 +310,12 @@ class InteractiveTuner:
         self.text_k1.on_submit(self.update_params)
         self.text_k2.on_submit(self.update_params)
         self.check_comp.on_clicked(self.toggle_compensation)
-        self.check_figs.on_clicked(self.toggle_figure_visibility)
+        self.check_figs1.on_clicked(self.toggle_figure_visibility)
+        self.check_figs2.on_clicked(self.toggle_figure_visibility)
         self.check_filters.on_clicked(self.toggle_filters)
         self.text_ema_alpha.on_submit(self.update_filter_params)
+        self.check_theta_g_filter.on_clicked(self.toggle_theta_g_filter)
+        self.text_theta_g_ema_alpha.on_submit(self.update_theta_g_filter_params)
         self.text_median_win.on_submit(self.update_filter_params)
         self.text_slope_interval.on_submit(self.update_slope_params)
         self.text_slope_thresh.on_submit(self.update_settling_params)
@@ -309,32 +339,40 @@ class InteractiveTuner:
         # Hide all plot figures by default on startup
         self.toggle_figure_visibility(None)
 
-    def calculate_mass(self, theta_g, Fc):
-        Lih = np.sqrt(Lgh**2 + Lgi**2 - 2 * Lgh * Lgi * np.cos(theta_g + IGO))
+    def calculate_mass(self, theta_a, Fc):
+        Lih = np.sqrt(Lgh**2 + Lgi**2 - 2 * Lgh * Lgi * np.cos(theta_a + IGO))
         GIH_cos = (Lih**2 + Lgi**2 - Lgh**2) / (2 * Lih * Lgi)
-        GIH_sin = (Lgh / Lih) * np.sin(theta_g + IGO)
+        GIH_sin = (Lgh / Lih) * np.sin(theta_a + IGO)
         GIH = np.arctan2(GIH_sin, GIH_cos)
         HIO = np.pi - IGO - GIH
-        a = np.sin(HIO) - np.cos(HIO)*np.tan(theta_g)
-
-        if self.use_fixed_a:
-            # If theta_g is a pandas Series, create a new Series for 'a'
-            # with the fixed value, preserving the index. This ensures
-            # that broadcasting works correctly when this function is called
-            # with a scalar Fc and a Series theta_g, preventing the AttributeError.
-            if isinstance(theta_g, pd.Series):
-                a = pd.Series(self.fixed_a_value, index=theta_g.index)
-            else:
-                a = self.fixed_a_value
-
+        a = np.sin(HIO) - np.cos(HIO)*np.tan(theta_a)
+        
         simple_lever = ((Fc * Lgh / Lag) * a) / 9.807
 
         w = simple_lever
         if self.use_compensation:
-            compensator = self.k1*theta_g + self.k2
+            compensator = self.k1*theta_a + self.k2
             w += compensator
 
         return w
+
+    def calculate_mass_surf_fit(self, theta_a, Fc, theta_g_raw):
+        # 1. Calculate simple_lever, which depends on theta_a (with offset)
+        Lih = np.sqrt(Lgh**2 + Lgi**2 - 2 * Lgh * Lgi * np.cos(theta_a + IGO))
+        GIH_cos = (Lih**2 + Lgi**2 - Lgh**2) / (2 * Lih * Lgi)
+        GIH_sin = (Lgh / Lih) * np.sin(theta_a + IGO)
+        GIH = np.arctan2(GIH_sin, GIH_cos)
+        HIO = np.pi - IGO - GIH
+        a = np.sin(HIO) - np.cos(HIO)*np.tan(theta_a)
+
+        simple_lever = ((Fc * Lgh / Lag) * a) / 9.807
+
+        # 2. Apply surface fit equation: est_load = -1324.8 + 1.0649*w + 974.53*theta_g
+        # where w is simple_lever and theta_g is raw theta_g
+        # The equation in the code is equivalent to the above.
+        # (-1.3248 tons + 1.0649e-03 * w_kg + 9.7453e-01 * theta_g_rad) * 1000 kg/ton
+        # = -1324.8 kg + 1.0649 * w_kg + 974.53 * theta_g_rad
+        return (-1.3248 + 1.0649e-03 * simple_lever + 9.7453e-01 * theta_g_raw) * 1000
 
     def recalculate_and_plot(self):
         # --- Define helper functions ---
@@ -343,7 +381,18 @@ class InteractiveTuner:
             return a * np.exp(b * x) + c
 
         # --- Perform Calculation ---
-        theta_g = self.df[col_theta_g] + self.theta_g_offset
+        theta_g_raw = self.df[col_theta_g]
+        theta_a = theta_g_raw + self.theta_g_offset
+
+        # --- Apply EMA to theta_a and recalculate derivatives if enabled ---
+        vel_g = self.df[col_vel_g]
+        acc_g = self.df[col_acc_g]
+        if self.use_theta_g_ema_filter:
+            theta_a = theta_a.ewm(alpha=self.theta_g_ema_alpha, adjust=False).mean()
+            # Recalculate derivatives from filtered theta_a
+            time_diff = self.df['time'].diff().replace(0, 1e-9)
+            vel_g = theta_a.diff() / time_diff
+            acc_g = vel_g.diff() / time_diff
 
         # --- Apply Filters ---
         pb_filtered = self.df[col_pb].copy()
@@ -369,7 +418,7 @@ class InteractiveTuner:
 
         # --- Apply Pressure Offset ---
         if self.use_pressure_offset:
-            pb_offset = 1699 * theta_g + 4023
+            pb_offset = 1699 * theta_a + 4023
             pr_offset = 413.3
             pb_filtered -= pb_offset
             pr_filtered -= pr_offset
@@ -382,7 +431,7 @@ class InteractiveTuner:
         toPa = self.toPa_base * self.sensor_scale_factor
         Fc = 2 * (Ab * pb_filtered - Ar * pr_filtered) * toPa
 
-        self.df[col_w_calculated] = self.calculate_mass(theta_g, Fc)
+        self.df[col_w_calculated] = self.calculate_mass(theta_a, Fc)
 
         # --- Calculate Slopes for plotting ---
         # Calculate the slope over a user-defined interval.
@@ -411,6 +460,9 @@ class InteractiveTuner:
 
         # --- Clear and Redraw Plots ---
         self.ax_time.clear()
+        self.ax_kin_theta.clear()
+        self.ax_kin_vel.clear()
+        self.ax_kin_acc.clear()
         self.ax_a.clear()
         self.ax_a2.clear()
         self.ax_pressure_pb.clear()
@@ -561,6 +613,34 @@ class InteractiveTuner:
                 'color': color
             })
 
+        # --- Plot for Kinematics Analysis ---
+        self.kinematics_fig.suptitle(f'Figure 1: Kinematics Analysis for "{self.current_filename}"')
+        
+        # Theta_g plot
+        self.ax_kin_theta.plot(self.df['time'], theta_g_raw, label='Raw θg (from CSV)', color='cyan', alpha=0.7)
+        self.ax_kin_theta.plot(self.df['time'], theta_a, label='Processed θa (with offset/filter)', color='blue')
+        self.ax_kin_theta.set_title('Boom Angle')
+        self.ax_kin_theta.set_ylabel('Angle (rad)')
+        self.ax_kin_theta.grid(True)
+        self.ax_kin_theta.legend()
+
+        # Velocity plot
+        self.ax_kin_vel.plot(self.df['time'], self.df[col_vel_g], label='Raw vel_g', color='orange', alpha=0.7)
+        self.ax_kin_vel.plot(self.df['time'], vel_g, label='Processed vel_g', color='red')
+        self.ax_kin_vel.set_title('Boom Angular Velocity (vel_g)')
+        self.ax_kin_vel.set_ylabel('Velocity (rad/s)')
+        self.ax_kin_vel.grid(True)
+        self.ax_kin_vel.legend()
+
+        # Acceleration plot
+        self.ax_kin_acc.plot(self.df['time'], self.df[col_acc_g], label='Raw acc_g', color='lightgreen', alpha=0.7)
+        self.ax_kin_acc.plot(self.df['time'], acc_g, label='Processed acc_g', color='green')
+        self.ax_kin_acc.set_title('Boom Angular Acceleration (acc_g)')
+        self.ax_kin_acc.set_ylabel('Acceleration (rad/s²)')
+        self.ax_kin_acc.set_xlabel('Time (s)')
+        self.ax_kin_acc.grid(True)
+        self.ax_kin_acc.legend()
+
         # --- Plot for Pressure Analysis in a separate window ---
         self.pressure_fig.suptitle(f'Figure 3: Pressure Analysis (pb) for "{self.current_filename}"')
         if 'time' in self.df.columns:
@@ -574,9 +654,9 @@ class InteractiveTuner:
             self.ax_pressure_pb.grid(True)
 
             # --- Top-right: Boom Angle (theta_g) vs Time ---
-            self.ax_theta_g_t.plot(self.df['time'], theta_g, label='θg', color='purple')
-            self.ax_theta_g_t.set_title('Boom Angle (θg) vs. Time')
-            self.ax_theta_g_t.set_ylabel('Angle (rad)')
+            self.ax_theta_g_t.plot(self.df['time'], theta_a, label='θa', color='purple')
+            self.ax_theta_g_t.set_title('Boom Angle (θa) vs. Time')
+            self.ax_theta_g_t.set_ylabel('θa (rad)')
             self.ax_theta_g_t.grid(True)
 
             # --- Add multi-target lines to pressure plots ---
@@ -646,9 +726,9 @@ class InteractiveTuner:
             self.ax_pressure_pr.grid(True)
 
             # --- Top-right: Boom Angle (theta_g) vs Time ---
-            self.ax_theta_g_t_pr.plot(self.df['time'], theta_g, label='θg', color='purple')
-            self.ax_theta_g_t_pr.set_title('Boom Angle (θg) vs. Time')
-            self.ax_theta_g_t_pr.set_ylabel('Angle (rad)')
+            self.ax_theta_g_t_pr.plot(self.df['time'], theta_a, label='θa', color='purple')
+            self.ax_theta_g_t_pr.set_title('Boom Angle (θa) vs. Time')
+            self.ax_theta_g_t_pr.set_ylabel('θa (rad)')
             self.ax_theta_g_t_pr.grid(True)
 
             # --- Add multi-target lines to pr pressure plots ---
@@ -798,8 +878,15 @@ class InteractiveTuner:
                     continue
 
                 Fc_new = 2 * (Ab * median_pbf - Ar * median_prf) * toPa
-                w_predicted = self.calculate_mass(theta_g.loc[segment_df.index], Fc_new)
-                mass_at_start = w_predicted.iloc[0]
+                segment_theta_a = theta_a.loc[segment_df.index]
+
+                if self.use_surf_fit:
+                    segment_theta_g_raw = self.df[col_theta_g].loc[segment_df.index]
+                    w_predicted = self.calculate_mass_surf_fit(segment_theta_a, Fc_new, segment_theta_g_raw)
+                else:
+                    w_predicted = self.calculate_mass(segment_theta_a, Fc_new)
+
+                mass_at_start = w_predicted.iloc[0] if not w_predicted.empty else 0
                 target_mass_values.append(mass_at_start)
 
                 self.ax_time.plot(segment_df['time'], w_predicted,
@@ -826,11 +913,11 @@ class InteractiveTuner:
 
             # --- Plot for Geometry Factor 'a' and theta_g ---
             if not plot_df.empty:
-                theta_g_plot = theta_g.loc[plot_df.index]
-                Lih = np.sqrt(Lgh**2 + Lgi**2 - 2 * Lgh * Lgi * np.cos(theta_g_plot + IGO)) # type: ignore
-                GIH = np.arcsin(np.clip((Lgh / Lih) * np.sin(theta_g_plot + IGO), -1.0, 1.0))
+                theta_a_plot = theta_a.loc[plot_df.index]
+                Lih = np.sqrt(Lgh**2 + Lgi**2 - 2 * Lgh * Lgi * np.cos(theta_a_plot + IGO)) # type: ignore
+                GIH = np.arcsin(np.clip((Lgh / Lih) * np.sin(theta_a_plot + IGO), -1.0, 1.0))
                 HIO = np.pi - IGO - GIH
-                a_values = np.sin(HIO) - np.cos(HIO) * np.tan(theta_g_plot)
+                a_values = np.sin(HIO) - np.cos(HIO) * np.tan(theta_a_plot)
 
                 # Plot 'a' on the primary y-axis
                 p1 = self.ax_a.plot(plot_df['time'], a_values, label='Geometry Factor (a)', color='purple')
@@ -840,8 +927,8 @@ class InteractiveTuner:
                 self.ax_a.grid(True)
 
                 # Use the existing secondary y-axis for theta_g
-                p2 = self.ax_a2.plot(plot_df['time'], theta_g_plot, label='Boom Angle (θg)', color='green', linestyle=':')
-                self.ax_a2.set_ylabel('θg (rad)', color='green')
+                p2 = self.ax_a2.plot(plot_df['time'], theta_a_plot, label='Boom Angle (θa)', color='green', linestyle=':')
+                self.ax_a2.set_ylabel('θa (rad)', color='green')
                 self.ax_a2.tick_params(axis='y', labelcolor='green')
 
                 # Combine legends
@@ -859,10 +946,10 @@ class InteractiveTuner:
         
         time_axis = self.df['time']
 
-        Lih_geom = np.sqrt(Lgh**2 + Lgi**2 - 2 * Lgh * Lgi * np.cos(theta_g + IGO))
-        GIH_geom = np.arcsin(np.clip((Lgh / Lih_geom) * np.sin(theta_g + IGO), -1.0, 1.0))
+        Lih_geom = np.sqrt(Lgh**2 + Lgi**2 - 2 * Lgh * Lgi * np.cos(theta_a + IGO))
+        GIH_geom = np.arcsin(np.clip((Lgh / Lih_geom) * np.sin(theta_a + IGO), -1.0, 1.0))
         HIO_geom = np.pi - IGO - GIH_geom
-        a_geom = np.sin(HIO_geom) - np.cos(HIO_geom) * np.tan(theta_g)
+        a_geom = np.sin(HIO_geom) - np.cos(HIO_geom) * np.tan(theta_a)
 
         # Plot Lih
         self.ax_lih.plot(time_axis, Lih_geom, label='Lih')
@@ -892,9 +979,9 @@ class InteractiveTuner:
         self.ax_a_geom.legend()
 
         # Plot theta_g
-        self.ax_theta_g_geom.plot(time_axis, theta_g, label='θg')
-        self.ax_theta_g_geom.set_title('θg vs. Time')
-        self.ax_theta_g_geom.set_ylabel('θg (rad)')
+        self.ax_theta_g_geom.plot(time_axis, theta_a, label='θa')
+        self.ax_theta_g_geom.set_title('θa vs. Time')
+        self.ax_theta_g_geom.set_ylabel('θa (rad)')
         self.ax_theta_g_geom.set_xlabel('Time (s)')
         self.ax_theta_g_geom.grid(True)
         self.ax_theta_g_geom.legend()
@@ -909,7 +996,7 @@ class InteractiveTuner:
             lih_at_max = Lih_geom.loc[max_gih_idx]
             hio_at_max = HIO_geom.loc[max_gih_idx]
             a_at_max = a_geom.loc[max_gih_idx]
-            theta_g_at_max = theta_g.loc[max_gih_idx]
+            theta_a_at_max = theta_a.loc[max_gih_idx]
 
             # Draw vertical lines
             v_line1 = self.ax_lih.axvline(x=time_at_max_gih, color='r', linestyle='--', label=f'Max GIH at t={time_at_max_gih:.2f}s')
@@ -923,7 +1010,7 @@ class InteractiveTuner:
             text2 = self.ax_gih.text(time_at_max_gih, max_gih_val, f' {max_gih_val:.3f} rad', va='bottom', ha='left', color='r', backgroundcolor='w')
             text3 = self.ax_hio.text(time_at_max_gih, hio_at_max, f' {hio_at_max:.3f} rad', va='bottom', ha='left', color='r', backgroundcolor='w')
             text4 = self.ax_a_geom.text(time_at_max_gih, a_at_max, f' {a_at_max:.3f}', va='bottom', ha='left', color='r', backgroundcolor='w')
-            text5 = self.ax_theta_g_geom.text(time_at_max_gih, theta_g_at_max, f' {theta_g_at_max:.3f} rad', va='bottom', ha='left', color='r', backgroundcolor='w')
+            text5 = self.ax_theta_g_geom.text(time_at_max_gih, theta_a_at_max, f' {theta_a_at_max:.3f} rad', va='bottom', ha='left', color='r', backgroundcolor='w')
 
             # Store artists to toggle visibility
             self.max_gih_annotations.extend([v_line1, v_line2, v_line3, v_line4, v_line5, text1, text2, text3, text4, text5])
@@ -935,6 +1022,7 @@ class InteractiveTuner:
         
         self.ax_lih.legend()
 
+        self.kinematics_fig.canvas.draw_idle()
         self.time_fig.canvas.draw_idle()
         self.pressure_fig.canvas.draw_idle()
         self.final_pressure_fig.canvas.draw_idle()
@@ -955,7 +1043,21 @@ class InteractiveTuner:
         self.recalculate_and_plot()
 
     def toggle_compensation(self, label):
-        self.use_compensation, self.use_fixed_a = self.check_comp.get_status()
+        # Get current statuses from widget after the click
+        statuses = self.check_comp.get_status()
+        comp_is_on, surf_is_on = statuses
+
+        # If 'Surf Fit' was just turned on, turn 'Compensator 1' off.
+        if label == 'Surf Fit' and surf_is_on:
+            if comp_is_on:
+                self.check_comp.set_active(0) # Toggle compensator off
+        # If 'Compensator 1' was just turned on, turn 'Surf Fit' off.
+        elif label == 'Compensator 1' and comp_is_on:
+            if surf_is_on:
+                self.check_comp.set_active(1) # Toggle surf fit off
+
+        # Read the final, correct state from the widget after potential toggles
+        self.use_compensation, self.use_surf_fit = self.check_comp.get_status()
         self.recalculate_and_plot()
 
     def toggle_max_gih_line(self, label):
@@ -976,7 +1078,8 @@ class InteractiveTuner:
         without closing them, which is cleaner than closing and recreating figures.
         It may not work with other matplotlib backends.
         """
-        time_vis, pressure_vis_pb, final_pressure_vis_pb, pressure_vis_pr, geom_vis, final_pressure_vis_pr = self.check_figs.get_status()
+        statuses = self.check_figs1.get_status() + self.check_figs2.get_status()
+        kinematics_vis, time_vis, pressure_vis_pb, final_pressure_vis_pb, pressure_vis_pr, geom_vis, final_pressure_vis_pr = statuses
 
         def _toggle_win(fig, is_visible):
             """Helper to safely toggle a window's visibility."""
@@ -987,6 +1090,7 @@ class InteractiveTuner:
                 else:
                     manager.window.withdraw() # type: ignore
 
+        _toggle_win(self.kinematics_fig, kinematics_vis)
         _toggle_win(self.time_fig, time_vis)
         _toggle_win(self.pressure_fig, pressure_vis_pb)
         _toggle_win(self.final_pressure_fig, final_pressure_vis_pb)
@@ -1006,6 +1110,19 @@ class InteractiveTuner:
             print(f"Invalid input for filter params. Please enter valid numbers.")
             self.text_ema_alpha.set_val(str(self.ema_alpha))
             self.text_median_win.set_val(str(self.median_window))
+            return
+        self.recalculate_and_plot()
+
+    def toggle_theta_g_filter(self, label):
+        self.use_theta_g_ema_filter = self.check_theta_g_filter.get_status()[0]
+        self.recalculate_and_plot()
+
+    def update_theta_g_filter_params(self, text):
+        try:
+            self.theta_g_ema_alpha = float(self.text_theta_g_ema_alpha.text)
+        except ValueError:
+            print(f"Invalid input for theta_g EMA alpha. Please enter a valid number.")
+            self.text_theta_g_ema_alpha.set_val(str(self.theta_g_ema_alpha))
             return
         self.recalculate_and_plot()
 

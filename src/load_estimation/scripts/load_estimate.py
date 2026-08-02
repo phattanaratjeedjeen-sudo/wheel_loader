@@ -15,7 +15,7 @@ class LoadEstimationNode(Node):
         super().__init__('load_estimation_node')
 
         # measured
-        self.theta_g = None             # boom angle (rad) 
+        self.theta_a = None             # boom angle (rad) 
         self.pb_filter = None           # bottom cylinder pressure (sensor val)
         self.pr_filter = None           # rod side pressure (sensor val)
 
@@ -34,9 +34,9 @@ class LoadEstimationNode(Node):
         self.IGO = np.pi - (np.arctan2(LgiY, LgiX))
 
         # compensator
-        self.k1 = -1.3248       # ton
-        self.k2 = 1.0649e-03    
-        self.k3 = 9.7453e-01    # ton/rad
+        self.k1 = -1.3564       # ton
+        self.k2 = 1.0652e-03    
+        self.k3 = 1.0077        # ton/rad
 
         # pressure predict model
         self.duration = 1.0
@@ -52,9 +52,9 @@ class LoadEstimationNode(Node):
         self.pb_ema_filtered = None
         self.pr_ema_filtered = None
 
-        # EMA filter for theta_g
-        self.theta_g_ema_alpha = 0.1
-        self.theta_g_ema_filtered = None
+        # EMA filter for theta_a
+        self.theta_a_ema_alpha = 0.1
+        self.theta_a_ema_filtered = None
 
         self.cb_group = ReentrantCallbackGroup()
 
@@ -84,15 +84,15 @@ class LoadEstimationNode(Node):
         self.get_logger().info("Load estimation node initialized.")
 
     def angle_callback(self, msg:Float64MultiArray):
-        theta_g = msg.data[0] + self.theta_g_offset
+        theta_a = msg.data[0] + self.theta_g_offset
 
-        # EMA filter for theta_g
-        if self.theta_g_ema_filtered is None:
-            self.theta_g_ema_filtered = theta_g
+        # EMA filter for theta_a
+        if self.theta_a_ema_filtered is None:
+            self.theta_a_ema_filtered = theta_a
         else:
-            self.theta_g_ema_filtered = self.theta_g_ema_alpha * theta_g + (1 - self.theta_g_ema_alpha) * self.theta_g_ema_filtered
+            self.theta_a_ema_filtered = self.theta_a_ema_alpha * theta_a + (1 - self.theta_a_ema_alpha) * self.theta_a_ema_filtered
         
-        self.theta_g = self.theta_g_ema_filtered
+        self.theta_a = self.theta_a_ema_filtered
 
     def pressure_callback(self, msg:Float64MultiArray):
         pb_raw = msg.data[0]
@@ -128,35 +128,33 @@ class LoadEstimationNode(Node):
         return pb_settle, pr_settle # sensor val
 
 
-    def calculate_load_mass(self, pbf, prf, theta_g):
+    def calculate_load_mass(self, pbf, prf, theta_a):
         # empty bucket offset (sensor val)
-        pb_offset = 1699*theta_g + 4023
+        pb_offset = 1699*(theta_a-self.theta_g_offset) + 4023
         pr_offset = 413.3
 
         # GEOMETRY
-        Lih = np.sqrt(self.Lgh**2 + self.Lgi**2 - 2 * self.Lgh * self.Lgi * np.cos(theta_g + self.IGO))
-        GIH = np.arcsin(np.clip((self.Lgh / Lih) * np.sin(theta_g + self.IGO), -1.0, 1.0))
+        Lih = np.sqrt(self.Lgh**2 + self.Lgi**2 - 2 * self.Lgh * self.Lgi * np.cos(theta_a + self.IGO))
+        GIH = np.arcsin(np.clip((self.Lgh / Lih) * np.sin(theta_a + self.IGO), -1.0, 1.0))
         HIO = np.pi - self.IGO - GIH
-        a = np.sin(HIO) - np.cos(HIO) * np.tan(theta_g)
+        a = np.sin(HIO) - np.cos(HIO) * np.tan(theta_a)
 
         # cylinder force (N)
         pb = pbf - pb_offset
         pr = prf - pr_offset
         Fc = 2 * (self.ab * pb - self.ar * pr) * self.toPa
 
-        simple_lever = ((Fc * self.Lgh / self.Lag) * a)/9.807
+        simple_lever_kg = ((Fc * self.Lgh / self.Lag) * a)/9.807
 
         # estimated mass (ton)
-        w = max(0.0, self.k1 + self.k2*simple_lever + self.k3*(theta_g - self.theta_g_offset))
-
-        # self.get_logger().info(f"pbf={pbf:.2f}, prf={prf:.2f}, theta_g={theta_g:.2f}, simple_lever={simple_lever:.2f}, w={w:.2f}")
+        w = max(0.0, self.k1 + self.k2*simple_lever_kg + self.k3*(theta_a-self.theta_g_offset))
         return w
 
 
     def srv_callback(self, request, response):
         try:
             # Initialization
-            if self.pb_filter is None or self.pr_filter is None or self.theta_g is None:
+            if self.pb_filter is None or self.pr_filter is None or self.theta_a is None:
                 raise Exception("Pressure or angle data not ready (filter window may be filling).")
             
             pbi, pri = self.pb_filter, self.pr_filter # Capture initial values at t=0
@@ -178,7 +176,7 @@ class LoadEstimationNode(Node):
             pbf, prf = np.median(pb_settle_history), np.median(pr_settle_history)
 
             # Calculate mass
-            load_mass = self.calculate_load_mass(pbf, prf, self.theta_g)
+            load_mass = self.calculate_load_mass(pbf, prf, self.theta_a)
             response.success = True
             response.message = f'load(ton): {load_mass:.2f}' 
         except Exception as e:

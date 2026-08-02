@@ -5,6 +5,7 @@ import os
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
+import argparse
 
 '''
 find: est_load(w, theta_g)
@@ -26,6 +27,7 @@ def find_surface_equation(df_long):
     best_rmse = float('inf')
     best_model = None
     best_poly = None
+    equation_deg1 = ""
     
     # Test polynomial degrees 1 through 5 to find the sweet spot
     for degree in range(1, 6):
@@ -41,6 +43,19 @@ def find_surface_equation(df_long):
         
         print(f"Testing Degree {degree}: R^2 = {r2:.5f}, RMSE = {rmse:.5f}")
         
+        if degree == 1:
+            # Build and store the degree 1 equation string
+            feature_names_d1 = poly.get_feature_names_out(['w', 'theta_g'])
+            coefs_d1 = model.coef_
+            intercept_d1 = model.intercept_
+            equation_deg1 = f"load(w, theta_g) = {intercept_d1:.4f}"
+            for name, coef in zip(feature_names_d1, coefs_d1):
+                name = name.replace(' ', ' * ').replace('^2', '**2').replace('^3', '**3').replace('^4', '**4').replace('^5', '**5')
+                if coef >= 0:
+                    equation_deg1 += f" + {coef:.4e} * {name}"
+                else:
+                    equation_deg1 += f" - {abs(coef):.4e} * {name}"
+
         if r2 > best_r2:
             best_r2 = r2
             best_rmse = rmse
@@ -56,32 +71,41 @@ def find_surface_equation(df_long):
     print(f"R^2:   {best_r2:.5f}")
     print(f"RMSE:  {best_rmse:.5f}")
     
-    # Build a readable equation string
-    feature_names = best_poly.get_feature_names_out(['w', 'theta_g'])
-    coefs = best_model.coef_
-    intercept = best_model.intercept_
+    print("\n--- Degree 1 Equation ---")
+    print(equation_deg1)
     
-    equation = f"load(w, theta_g) = {intercept:.4f}"
-    
-    for name, coef in zip(feature_names, coefs):
-        # Format the terms to look like standard math (e.g., w * theta_g)
-        name = name.replace(' ', ' * ').replace('^2', '**2').replace('^3', '**3').replace('^4', '**4').replace('^5', '**5')
+    if best_degree > 1:
+        # Build and print the best equation string
+        feature_names = best_poly.get_feature_names_out(['w', 'theta_g'])
+        coefs = best_model.coef_
+        intercept = best_model.intercept_
         
-        if coef >= 0:
-            equation += f" + {coef:.4e} * {name}"
-        else:
-            equation += f" - {abs(coef):.4e} * {name}"
+        best_equation = f"load(w, theta_g) = {intercept:.4f}"
+        
+        for name, coef in zip(feature_names, coefs):
+            # Format the terms to look like standard math (e.g., w * theta_g)
+            name = name.replace(' ', ' * ').replace('^2', '**2').replace('^3', '**3').replace('^4', '**4').replace('^5', '**5')
             
-    print("\n--- Final Surface Equation ---")
-    print(equation)
+            if coef >= 0:
+                best_equation += f" + {coef:.4e} * {name}"
+            else:
+                best_equation += f" - {abs(coef):.4e} * {name}"
+                
+        print(f"\n--- Best Fit (Degree {best_degree}) Equation ---")
+        print(best_equation)
+            
     print("------------------------------\n")
     
     return best_model, best_poly
 
 def main():
+    parser = argparse.ArgumentParser(description='Fit a surface to load data and find the best equation.')
+    parser.add_argument('--no-plot', action='store_true', help='Run the script without showing the 3D plot.')
+    args = parser.parse_args()
+
     # 1. Define the filename exactly as requested
-    path = os.path.expanduser('~/wheel_loader_ws/results/csv/settle/')
-    filename = "estimate load - geometry.csv"
+    path = os.path.expanduser('~/wheel_loader_ws/results/csv')
+    filename = "surffit.csv"
     filename = os.path.join(path, filename)
     
     # Check if file exists before trying to read it
@@ -151,12 +175,14 @@ def main():
     cbar = fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10, pad=0.1)
     cbar.set_label('Load (t)')
     
-    plt.legend()
-    plt.tight_layout()
-    
-    # Show the interactive plot window
-    print("Generating plot...")
-    plt.show()
+    if not args.no_plot:
+        plt.legend()
+        plt.tight_layout()
+        # Show the interactive plot window
+        print("Generating plot...")
+        plt.show()
+    else:
+        print("Plot generation skipped due to --no-plot flag.")
 
 if __name__ == "__main__":
     main()

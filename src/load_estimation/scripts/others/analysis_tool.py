@@ -4,12 +4,14 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
-from matplotlib.widgets import Slider, CheckButtons, Button, TextBox
+from matplotlib.widgets import CheckButtons, Button, TextBox
 from tkinter import filedialog
 import re
 from scipy.optimize import curve_fit
-from scipy import stats
 from matplotlib import cm
+import subprocess
+import threading
+import queue
 
 # --- Constants ---
 Lgh = 1.63
@@ -44,14 +46,22 @@ class InteractiveTuner:
         self.sensor_scale_factor = 1.0
         self.theta_g_offset = -0.62
         self.toPa_base = 40 * 10**6 / (2**15 - 1)
-        self.use_compensation = True
+        self.use_compensation = False
         self.k1 = 900.0
         self.k2 = -550
         self.use_surf_fit = False
+        self.C1 = -0.2118
+        self.C2 = 1.0545e-03
+        self.C3 = 4.6246e-01
+        self.surf_fit_rhs = f"{self.C1} + {self.C2}*w + {self.C3}*theta_g"
+        self.eq_deg1_rhs = self.surf_fit_rhs
+        self.eq_best_rhs = self.surf_fit_rhs
+        self.eq_best_degree = 1
         self.use_median_filter = True
         self.use_ema_filter = True
         self.use_pressure_offset = True
         self.ema_alpha = 0.001
+        self.workspace_root = os.path.expanduser('~/wheel_loader_ws/results/csv')
         self.use_theta_g_ema_filter = True
         self.theta_g_ema_alpha = 0.1
         self.median_window = 100.0
@@ -71,6 +81,10 @@ class InteractiveTuner:
         self.settling_results = []  # List of dicts for plotting results
         self.final_pressure_results = []  # List of dicts for final pressure results
         self.max_gih_annotations = [] # To hold vline and text artists for geometry figure
+        self.surf_fit_export_data = [] # For exporting data for surface fitting
+        self.ui_update_queue = queue.Queue()
+
+        self.control_artists = []
 
         if self.auto_set_theta_g:
             match = re.search(r'(\d+\.\d+)', self.current_filename)
@@ -128,6 +142,10 @@ class InteractiveTuner:
         self.geometry_fig, (self.ax_lih, self.ax_gih, self.ax_hio, self.ax_a_geom, self.ax_theta_g_geom) = plt.subplots(5, 1, num='Figure 6: Geometry', figsize=(10, 14), sharex=True)
         self.geometry_fig.subplots_adjust(left=0.1, bottom=0.05, right=0.95, top=0.92, hspace=0.4)
 
+        # --- Create a new Figure for Validation ---
+        self.validation_fig, (self.ax_rmse_s, self.ax_rmse_w) = plt.subplots(2, 1, num='Figure 8: Validation', figsize=(10, 8))
+        self.validation_fig.subplots_adjust(left=0.08, bottom=0.08, right=0.95, top=0.92, hspace=0.4)
+
         # Add CheckButtons for the vertical line
         ax_check_v_line = self.geometry_fig.add_axes([0.75, 0.90, 0.2, 0.05]) # [left, bottom, width, height]
         self.check_v_line_geom = CheckButtons(ax_check_v_line, ['Show Max GIH'], actives=[True])
@@ -135,7 +153,11 @@ class InteractiveTuner:
         
         # --- Create a separate Figure for controls ---
         self.control_fig = plt.figure("Tuning Panel", figsize=(7, 10.5))
-        self.control_fig.subplots_adjust(left=0.05, right=0.95, top=0.98, bottom=0.02)
+        # We will manage adjustments manually to accommodate a scrollbar.
+        # subplots_adjust will be called after all widgets are created.
+        self.view_bottom = 0.02
+        self.view_top = 0.98
+
 
         # --- Create UI Controls in the new window, arranged top-to-bottom ---
         # This procedural layout makes adding/removing widgets easier.
@@ -158,8 +180,8 @@ class InteractiveTuner:
         v_gap_section = 0.025
         h_gap_widget = 0.03
 
-        # Proportions for common layouts
-        prop_checkbox = 0.35
+        # Proportions for common layouts (Checkbox width vs Textbox width)
+        prop_checkbox = 0.50
         prop_widget = 1.0 - prop_checkbox - h_gap_widget
         prop_half = 0.5 - h_gap_widget / 2
 
@@ -167,7 +189,8 @@ class InteractiveTuner:
         def add_section_title(title):
             nonlocal y_cursor
             y_cursor -= v_gap_section
-            self.control_fig.text(left_margin, y_cursor, title, fontsize=10, weight='bold')
+            text_artist = self.control_fig.text(left_margin, y_cursor, title, fontsize=10, weight='bold')
+            self.control_artists.append(text_artist)
             y_cursor -= (h_widget + v_gap_widget) # Add space after title
 
         # --- Section 1: File & View ---
@@ -176,10 +199,11 @@ class InteractiveTuner:
         # Button on top
         y_cursor -= h_widget
         ax_select_btn = self.control_fig.add_axes([left_margin, y_cursor, content_width, h_widget])
+        self.control_artists.append(ax_select_btn)
         y_cursor -= v_gap_widget
 
         # Checkboxes below in two columns for a more compact view
-        fig_labels = ['Kinematics', 'Load(t)', 'Pressure(t) pb', 'Final Pressure pb', 'Pressure(t) pr', 'Geometry', 'Final Pressure pr']
+        fig_labels = ['Kinematics', 'Load(t)', 'Pressure(t) pb', 'Final Pressure pb', 'Pressure(t) pr', 'Geometry', 'Final Pressure pr', 'Validation']
         num_figs_col1 = 4
         self.fig_labels_col1 = fig_labels[:num_figs_col1]
         self.fig_labels_col2 = fig_labels[num_figs_col1:]
@@ -189,7 +213,9 @@ class InteractiveTuner:
         
         w_half = content_width * prop_half
         ax_fig_vis1 = self.control_fig.add_axes([left_margin, y_cursor, w_half, row_h_checks])
+        self.control_artists.append(ax_fig_vis1)
         ax_fig_vis2 = self.control_fig.add_axes([left_margin + w_half + h_gap_widget, y_cursor, w_half, row_h_checks])
+        self.control_artists.append(ax_fig_vis2)
         y_cursor -= v_gap_widget
 
         # --- Section 2: Signal Filtering ---
@@ -199,20 +225,27 @@ class InteractiveTuner:
         widget_x = left_margin + content_width * prop_checkbox + h_gap_widget
         widget_w = content_width * prop_widget
         ax_filter_checks = self.control_fig.add_axes([left_margin, y_cursor, content_width * prop_checkbox, row_h])
+        self.control_artists.append(ax_filter_checks)
         ax_median_win = self.control_fig.add_axes([widget_x, y_cursor + h_widget * 2, widget_w, h_widget])
+        self.control_artists.append(ax_median_win)
         ax_ema_alpha = self.control_fig.add_axes([widget_x, y_cursor + h_widget, widget_w, h_widget])
+        self.control_artists.append(ax_ema_alpha)
         y_cursor -= v_gap_widget
 
         # New widgets for theta_g EMA
         y_cursor -= h_checkbox
-        ax_check_theta_g_filter = self.control_fig.add_axes([left_margin, y_cursor, prop_checkbox, h_checkbox])
+        ax_check_theta_g_filter = self.control_fig.add_axes([left_margin, y_cursor, content_width * prop_checkbox, h_widget+0.01])
+        self.control_artists.append(ax_check_theta_g_filter)
         ax_theta_g_ema_alpha = self.control_fig.add_axes([widget_x, y_cursor, widget_w, h_widget])
+        self.control_artists.append(ax_theta_g_ema_alpha)
         y_cursor -= v_gap_widget
 
         w_half = content_width * prop_half
         y_cursor -= h_widget
         ax_sensor_scale = self.control_fig.add_axes([left_margin, y_cursor, w_half, h_widget])
+        self.control_artists.append(ax_sensor_scale)
         ax_theta_g_offset = self.control_fig.add_axes([left_margin + w_half + h_gap_widget, y_cursor, w_half, h_widget])
+        self.control_artists.append(ax_theta_g_offset)
         y_cursor -= v_gap_widget
 
         # --- Section 3: Load Model Compensation ---
@@ -220,43 +253,87 @@ class InteractiveTuner:
         row_h = h_checkbox_double
         y_cursor -= row_h
         ax_check_comp1 = self.control_fig.add_axes([left_margin, y_cursor, content_width * prop_checkbox, row_h])
+        self.control_artists.append(ax_check_comp1)
         ax_k1 = self.control_fig.add_axes([widget_x, y_cursor + h_widget, widget_w, h_widget])
+        self.control_artists.append(ax_k1)
         ax_k2 = self.control_fig.add_axes([widget_x, y_cursor, widget_w, h_widget])
+        self.control_artists.append(ax_k2)
+        y_cursor -= v_gap_widget
+
+        # --- Surf Fit Sub-section ---
+        y_cursor -= h_widget
+        w_third = (content_width - 2 * h_gap_widget) / 3
+        ax_export_surf_fit_btn = self.control_fig.add_axes([left_margin, y_cursor, w_third, h_widget])
+        self.control_artists.append(ax_export_surf_fit_btn)
+        ax_find_surf_fit_btn = self.control_fig.add_axes([left_margin + w_third + h_gap_widget, y_cursor, w_third, h_widget])
+        self.control_artists.append(ax_find_surf_fit_btn)
+        ax_validate_btn = self.control_fig.add_axes([left_margin + 2 * (w_third + h_gap_widget), y_cursor, w_third, h_widget])
+        self.control_artists.append(ax_validate_btn)
+        y_cursor -= v_gap_widget
+
+        # Add text display and apply button for Degree 1
+        y_cursor -= h_widget
+        ax_apply_deg1_btn = self.control_fig.add_axes([left_margin, y_cursor, prop_checkbox, h_widget])
+        self.control_artists.append(ax_apply_deg1_btn)
+        self.text_eq_deg1 = self.control_fig.text(left_margin + prop_checkbox + h_gap_widget, y_cursor + h_widget/2, "Eq Deg 1: (Click 'Find Equations' first)", va='center', ha='left', fontsize=8, wrap=True)
+        self.control_artists.append(self.text_eq_deg1)
+        y_cursor -= v_gap_widget
+
+        # Add text display and apply button for Best Fit
+        y_cursor -= h_widget
+        ax_apply_best_btn = self.control_fig.add_axes([left_margin, y_cursor, prop_checkbox, h_widget])
+        self.control_artists.append(ax_apply_best_btn)
+        self.text_eq_best = self.control_fig.text(left_margin + prop_checkbox + h_gap_widget, y_cursor + h_widget/2, "Eq Best: (Click 'Find Equations' first)", va='center', ha='left', fontsize=8, wrap=True)
+        self.control_artists.append(self.text_eq_best)
         y_cursor -= v_gap_widget
 
         # --- Section 4: Settling Time Analysis ---
         add_section_title('Settling Time Analysis')
         
         y_cursor -= h_checkbox
-        ax_check_auto_theta = self.control_fig.add_axes([left_margin, y_cursor, content_width, h_checkbox])
+        ax_check_auto_theta = self.control_fig.add_axes([left_margin, y_cursor, content_width, h_checkbox+0.01])
+        self.control_artists.append(ax_check_auto_theta)
         y_cursor -= v_gap_widget
 
         y_cursor -= h_checkbox
-        ax_fill_targets = self.control_fig.add_axes([left_margin, y_cursor, content_width, h_checkbox])
+        ax_fill_targets = self.control_fig.add_axes([left_margin, y_cursor, content_width, h_checkbox+0.01])
+        self.control_artists.append(ax_fill_targets)
         y_cursor -= v_gap_widget
 
+        # Row for target theta list
         y_cursor -= h_widget
         ax_target_theta = self.control_fig.add_axes([left_margin, y_cursor, content_width, h_widget])
+        self.control_artists.append(ax_target_theta)
         y_cursor -= v_gap_widget
 
+        # Row for thresholds (3 widgets)
+        w_third = (content_width - 2 * h_gap_widget) / 3
         y_cursor -= h_widget
-        ax_theta_thresh = self.control_fig.add_axes([left_margin, y_cursor, w_half, h_widget])
-        ax_settling_dur_req = self.control_fig.add_axes([left_margin + w_half + h_gap_widget, y_cursor, w_half, h_widget])
+        ax_theta_thresh = self.control_fig.add_axes([left_margin, y_cursor, w_third, h_widget])
+        self.control_artists.append(ax_theta_thresh)
+        ax_vel_thresh_auto = self.control_fig.add_axes([left_margin + w_third + h_gap_widget, y_cursor, w_third, h_widget])
+        self.control_artists.append(ax_vel_thresh_auto)
+        ax_acc_thresh_auto = self.control_fig.add_axes([left_margin + 2 * (w_third + h_gap_widget), y_cursor, w_third, h_widget])
+        self.control_artists.append(ax_acc_thresh_auto)
         y_cursor -= v_gap_widget
 
+        # Row for slope/settling parameters (3 widgets)
         y_cursor -= h_widget
-        ax_vel_thresh_auto = self.control_fig.add_axes([left_margin, y_cursor, w_half, h_widget])
-        ax_acc_thresh_auto = self.control_fig.add_axes([left_margin + w_half + h_gap_widget, y_cursor, w_half, h_widget])
+        ax_settling_dur_req = self.control_fig.add_axes([left_margin, y_cursor, w_third, h_widget])
+        ax_slope_interval = self.control_fig.add_axes([left_margin + w_third + h_gap_widget, y_cursor, w_third, h_widget])
+        ax_slope_thresh = self.control_fig.add_axes([left_margin + 2 * (w_third + h_gap_widget), y_cursor, w_third, h_widget])
+        self.control_artists.append(ax_settling_dur_req)
+        self.control_artists.append(ax_slope_interval)
+        self.control_artists.append(ax_slope_thresh)
         y_cursor -= v_gap_widget
 
-        y_cursor -= h_checkbox
-        ax_check_slope_filter = self.control_fig.add_axes([left_margin, y_cursor, prop_checkbox, h_checkbox])
-        ax_slope_ema_alpha = self.control_fig.add_axes([widget_x, y_cursor, widget_w, h_widget])
-        y_cursor -= v_gap_widget
-
-        y_cursor -= h_widget
-        ax_slope_interval = self.control_fig.add_axes([left_margin, y_cursor, w_half, h_widget])
-        ax_slope_thresh = self.control_fig.add_axes([left_margin + w_half + h_gap_widget, y_cursor, w_half, h_widget])
+        # Row for slope filter checkbox and its textbox
+        row_h = h_checkbox_double
+        y_cursor -= row_h
+        ax_check_slope_filter = self.control_fig.add_axes([left_margin, y_cursor, content_width * prop_checkbox, row_h])
+        self.control_artists.append(ax_check_slope_filter)
+        ax_slope_ema_alpha = self.control_fig.add_axes([widget_x, y_cursor + row_h/2 - h_widget/2, widget_w, h_widget])
+        self.control_artists.append(ax_slope_ema_alpha)
         y_cursor -= v_gap_widget
 
         # --- Section 5: Final Pressure Analysis ---
@@ -265,7 +342,9 @@ class InteractiveTuner:
         textbox_x_final = left_margin + content_width * 0.1
         textbox_w_final = content_width * (prop_half - 0.1)
         ax_ts_param = self.control_fig.add_axes([textbox_x_final, y_cursor, textbox_w_final, h_widget])
+        self.control_artists.append(ax_ts_param)
         ax_duration_param = self.control_fig.add_axes([textbox_x_final + textbox_w_final + h_gap_widget, y_cursor, textbox_w_final, h_widget])
+        self.control_artists.append(ax_duration_param)
         y_cursor -= v_gap_widget
 
         # --- Instantiate Widgets (in section order) ---
@@ -287,6 +366,13 @@ class InteractiveTuner:
         self.check_comp = CheckButtons(ax_check_comp1, ['Compensator 1', 'Surf Fit'], [self.use_compensation, self.use_surf_fit])
         self.text_k1 = TextBox(ax_k1, 'k1', initial=str(self.k1))
         self.text_k2 = TextBox(ax_k2, 'k2', initial=str(self.k2))
+        self.btn_export_surf_fit = Button(ax_export_surf_fit_btn, 'Export for Surf Fit')
+        self.btn_find_surf_fit = Button(ax_find_surf_fit_btn, 'Find Equations')
+        self.btn_validate = Button(ax_validate_btn, 'Validate')
+        self.btn_apply_deg1 = Button(ax_apply_deg1_btn, 'Apply Degree 1')
+        self.btn_apply_best = Button(ax_apply_best_btn, 'Apply Best Fit')
+        self.btn_apply_deg1.ax.set_visible(False) # Hide until equations are found
+        self.btn_apply_best.ax.set_visible(False)
 
         # Section 4: Settling Time Analysis
         self.check_auto_theta = CheckButtons(ax_check_auto_theta, ['Auto-set θg from filename'], [self.auto_set_theta_g])
@@ -295,11 +381,11 @@ class InteractiveTuner:
         self.text_theta_thresh = TextBox(ax_theta_thresh, 'θg Thresh', initial=str(self.theta_g_threshold))
         self.text_vel_thresh = TextBox(ax_vel_thresh_auto, 'Vel Thresh', initial=str(self.vel_g_threshold_auto))
         self.text_acc_thresh = TextBox(ax_acc_thresh_auto, 'Acc Thresh', initial=str(self.acc_g_threshold_auto))
-        self.text_settling_dur_req = TextBox(ax_settling_dur_req, 'Stable Dur (s)', initial=str(self.settling_duration_req))
-        self.check_slope_filter = CheckButtons(ax_check_slope_filter, ['Filter Slope (EMA)'], [self.use_slope_filter])
-        self.text_slope_ema_alpha = TextBox(ax_slope_ema_alpha, 'Slope EMA α', initial=str(self.slope_ema_alpha))
+        self.text_settling_dur_req = TextBox(ax_settling_dur_req, 'Stable Dur', initial=str(self.settling_duration_req))
         self.text_slope_interval = TextBox(ax_slope_interval, 'Slope Interval (s)', initial=str(self.slope_time_interval))
         self.text_slope_thresh = TextBox(ax_slope_thresh, 'Slope Thresh', initial=str(self.slope_threshold))
+        self.check_slope_filter = CheckButtons(ax_check_slope_filter, ['Filter Slope (EMA)'], [self.use_slope_filter])
+        self.text_slope_ema_alpha = TextBox(ax_slope_ema_alpha, 'Slope EMA α', initial=str(self.slope_ema_alpha))
 
         # Section 5: Final Pressure Analysis
         self.text_ts_param = TextBox(ax_ts_param, 'Ts (sec)', initial=str(self.ts_param))
@@ -331,13 +417,69 @@ class InteractiveTuner:
         self.text_ts_param.on_submit(self.update_final_pressure_params)
         self.text_duration_param.on_submit(self.update_final_pressure_params)
         self.text_sensor_scale.on_submit(self.update_sensor_scale_factor)
+        self.btn_export_surf_fit.on_clicked(self.export_for_surf_fit)
+        self.btn_find_surf_fit.on_clicked(self.find_surf_fit_equations)
+        self.btn_apply_deg1.on_clicked(self.apply_deg1_equation)
+        self.btn_validate.on_clicked(self.validate_and_export)
+        self.btn_apply_best.on_clicked(self.apply_best_equation)
         self.text_theta_g_offset.on_submit(self.update_theta_g_offset)
+
+        # --- Finalize Control UI ---
+        self.control_fig.subplots_adjust(left=0.05, right=0.95, top=self.view_top, bottom=self.view_bottom)
+        self.control_fig.canvas.mpl_connect('scroll_event', self.on_scroll)
 
         # --- Initial Calculation and Plot ---
         self.recalculate_and_plot()
 
         # Hide all plot figures by default on startup
         self.toggle_figure_visibility(None)
+
+        # Start the queue checker to listen for UI updates from background threads
+        self.process_ui_updates()
+
+    def on_scroll(self, event):
+        """Handles mouse wheel scrolling on the control panel."""
+        all_y = []
+        for artist in self.control_artists:
+            if isinstance(artist, plt.Axes):
+                pos = artist.get_position()
+                all_y.append(pos.y0)
+                all_y.append(pos.y1)
+            elif isinstance(artist, plt.Text):
+                all_y.append(artist.get_position()[1])
+
+        if not all_y:
+            return
+
+        min_y, max_y = min(all_y), max(all_y)
+
+        # Mouse wheel up (step=1) should move content down (dy<0)
+        # Mouse wheel down (step=-1) should move content up (dy>0)
+        dy = -event.step * 0.05
+
+        # dy > 0: content moves UP. Stop when bottom of content reaches bottom of view.
+        if dy > 0:
+            scroll_up_space = self.view_bottom - min_y
+            if scroll_up_space <= 0:
+                return
+            dy = min(dy, scroll_up_space)
+
+        # dy < 0: content moves DOWN. Stop when top of content reaches top of view.
+        elif dy < 0:
+            scroll_down_space = self.view_top - max_y
+            if scroll_down_space >= 0:
+                return
+            dy = max(dy, scroll_down_space)
+
+        for artist in self.control_artists:
+            if isinstance(artist, plt.Axes):
+                pos = artist.get_position()
+                artist.set_position([pos.x0, pos.y0 + dy, pos.width, pos.height])
+            elif isinstance(artist, plt.Text):
+                x, y = artist.get_position()
+                artist.set_position((x, y + dy))
+
+        self.control_fig.canvas.draw_idle()
 
     def calculate_mass(self, theta_a, Fc):
         Lih = np.sqrt(Lgh**2 + Lgi**2 - 2 * Lgh * Lgi * np.cos(theta_a + IGO))
@@ -354,7 +496,7 @@ class InteractiveTuner:
             compensator = self.k1*theta_a + self.k2
             w += compensator
 
-        return w
+        return w, simple_lever
 
     def calculate_mass_surf_fit(self, theta_a, Fc, theta_g_raw):
         # 1. Calculate simple_lever, which depends on theta_a (with offset)
@@ -367,12 +509,17 @@ class InteractiveTuner:
 
         simple_lever = ((Fc * Lgh / Lag) * a) / 9.807
 
-        # 2. Apply surface fit equation: est_load = -1324.8 + 1.0649*w + 974.53*theta_g
-        # where w is simple_lever and theta_g is raw theta_g
-        # The equation in the code is equivalent to the above.
-        # (-1.3248 tons + 1.0649e-03 * w_kg + 9.7453e-01 * theta_g_rad) * 1000 kg/ton
-        # = -1324.8 kg + 1.0649 * w_kg + 974.53 * theta_g_rad
-        return (-1.3248 + 1.0649e-03 * simple_lever + 9.7453e-01 * theta_g_raw) * 1000
+        # 2. Apply surface fit equation using eval
+        # The equation from surface_fit.py uses 'w' and 'theta_g' as variable names
+        scope = {
+            'w': simple_lever,
+            'theta_g': theta_g_raw,
+            'np': np # For safety if any numpy functions are in the string
+        }
+        
+        # The self.surf_fit_rhs string is like "-1.3248 + 1.0649e-03 * w + 9.7453e-01 * theta_g"
+        load_in_tons = eval(self.surf_fit_rhs, {'np': np}, scope)
+        return load_in_tons * 1000, simple_lever
 
     def recalculate_and_plot(self):
         # --- Define helper functions ---
@@ -418,7 +565,7 @@ class InteractiveTuner:
 
         # --- Apply Pressure Offset ---
         if self.use_pressure_offset:
-            pb_offset = 1699 * theta_a + 4023
+            pb_offset = 1699 * theta_g_raw + 4023
             pr_offset = 413.3
             pb_filtered -= pb_offset
             pr_filtered -= pr_offset
@@ -431,7 +578,7 @@ class InteractiveTuner:
         toPa = self.toPa_base * self.sensor_scale_factor
         Fc = 2 * (Ab * pb_filtered - Ar * pr_filtered) * toPa
 
-        self.df[col_w_calculated] = self.calculate_mass(theta_a, Fc)
+        self.df[col_w_calculated], _ = self.calculate_mass(theta_a, Fc)
 
         # --- Calculate Slopes for plotting ---
         # Calculate the slope over a user-defined interval.
@@ -483,6 +630,7 @@ class InteractiveTuner:
         self.max_gih_annotations = [] # Just clear the list, artists are cleared with axes
         self.settling_results = []
         self.final_pressure_results = []
+        self.surf_fit_export_data = [] # Clear export data on each replot
         colors = cm.get_cmap('viridis')(np.linspace(0, 1, max(1, len(self.analysis_targets))))
 
         # --- Loop through each detected target for analysis ---
@@ -586,15 +734,21 @@ class InteractiveTuner:
                 try:
                     p0 = (pb_window_np[0] - pb_window_np[-1], -0.1, pb_window_np[-1])
                     popt_pb, _ = curve_fit(exp_func, t_np, pb_window_np, p0=p0, maxfev=5000, bounds=([-np.inf, -np.inf, 0], [np.inf, 0, np.inf]))
-                    residuals = pb_window_np - exp_func(t_np, *popt_pb)
-                    r_squared_pb = 1 - (np.sum(residuals**2) / np.sum((pb_window_np - np.mean(pb_window_np))**2))
+                    ss_total_pb = np.sum((pb_window_np - np.mean(pb_window_np))**2)
+                    if ss_total_pb > 1e-9: # Avoid division by zero for constant data
+                        residuals = pb_window_np - exp_func(t_np, *popt_pb)
+                        ss_res_pb = np.sum(residuals**2)
+                        r_squared_pb = 1 - (ss_res_pb / ss_total_pb)
                 except (RuntimeError, ValueError): pass
 
                 try:
                     p0 = (pr_window_np[0] - pr_window_np[-1], -0.1, pr_window_np[-1])
                     popt_pr, _ = curve_fit(exp_func, t_np, pr_window_np, p0=p0, maxfev=5000, bounds=([-np.inf, -np.inf, 0], [np.inf, 0, np.inf]))
-                    residuals = pr_window_np - exp_func(t_np, *popt_pr)
-                    r_squared_pr = 1 - (np.sum(residuals**2) / np.sum((pr_window_np - np.mean(pr_window_np))**2))
+                    ss_total_pr = np.sum((pr_window_np - np.mean(pr_window_np))**2)
+                    if ss_total_pr > 1e-9: # Avoid division by zero for constant data
+                        residuals = pr_window_np - exp_func(t_np, *popt_pr)
+                        ss_res_pr = np.sum(residuals**2)
+                        r_squared_pr = 1 - (ss_res_pr / ss_total_pr)
                 except (RuntimeError, ValueError): pass
 
             self.final_pressure_results.append({
@@ -654,9 +808,9 @@ class InteractiveTuner:
             self.ax_pressure_pb.grid(True)
 
             # --- Top-right: Boom Angle (theta_g) vs Time ---
-            self.ax_theta_g_t.plot(self.df['time'], theta_a, label='θa', color='purple')
-            self.ax_theta_g_t.set_title('Boom Angle (θa) vs. Time')
-            self.ax_theta_g_t.set_ylabel('θa (rad)')
+            self.ax_theta_g_t.plot(self.df['time'], theta_g_raw, label='θg (raw)', color='purple')
+            self.ax_theta_g_t.set_title('Boom Angle (θg) vs. Time')
+            self.ax_theta_g_t.set_ylabel('θg (rad)')
             self.ax_theta_g_t.grid(True)
 
             # --- Add multi-target lines to pressure plots ---
@@ -726,9 +880,9 @@ class InteractiveTuner:
             self.ax_pressure_pr.grid(True)
 
             # --- Top-right: Boom Angle (theta_g) vs Time ---
-            self.ax_theta_g_t_pr.plot(self.df['time'], theta_a, label='θa', color='purple')
-            self.ax_theta_g_t_pr.set_title('Boom Angle (θa) vs. Time')
-            self.ax_theta_g_t_pr.set_ylabel('θa (rad)')
+            self.ax_theta_g_t_pr.plot(self.df['time'], theta_g_raw, label='θg (raw)', color='purple')
+            self.ax_theta_g_t_pr.set_title('Boom Angle (θg) vs. Time')
+            self.ax_theta_g_t_pr.set_ylabel('θg (rad)')
             self.ax_theta_g_t_pr.grid(True)
 
             # --- Add multi-target lines to pr pressure plots ---
@@ -882,15 +1036,23 @@ class InteractiveTuner:
 
                 if self.use_surf_fit:
                     segment_theta_g_raw = self.df[col_theta_g].loc[segment_df.index]
-                    w_predicted = self.calculate_mass_surf_fit(segment_theta_a, Fc_new, segment_theta_g_raw)
+                    w_predicted, simple_lever_series = self.calculate_mass_surf_fit(segment_theta_a, Fc_new, segment_theta_g_raw)
                 else:
-                    w_predicted = self.calculate_mass(segment_theta_a, Fc_new)
+                    w_predicted, simple_lever_series = self.calculate_mass(segment_theta_a, Fc_new)
 
                 mass_at_start = w_predicted.iloc[0] if not w_predicted.empty else 0
+                simple_lever_at_start = simple_lever_series.iloc[0] if not simple_lever_series.empty else 0
                 target_mass_values.append(mass_at_start)
 
+                # Get the actual theta_g (raw) at the start of the segment for the legend
+                start_idx = (self.df['time'] - start_time).abs().idxmin()
+                actual_theta_g_at_start = theta_g_raw.at[start_idx]
+                
+                # Store data for the export button
+                self.surf_fit_export_data.append({'theta_g': actual_theta_g_at_start, 'mass': simple_lever_at_start})
+
                 self.ax_time.plot(segment_df['time'], w_predicted,
-                                  label=f'Est. Mass (Tgt {res["target_g"]:.2f}) ({mass_at_start:.1f} kg)',
+                                  label=f'Est. Mass (θg {actual_theta_g_at_start:.2f}) ({mass_at_start:.1f} kg)',
                                   linestyle='--', color=res['color'])
 
             # --- Finalize Title with all stats ---
@@ -1079,7 +1241,7 @@ class InteractiveTuner:
         It may not work with other matplotlib backends.
         """
         statuses = self.check_figs1.get_status() + self.check_figs2.get_status()
-        kinematics_vis, time_vis, pressure_vis_pb, final_pressure_vis_pb, pressure_vis_pr, geom_vis, final_pressure_vis_pr = statuses
+        kinematics_vis, time_vis, pressure_vis_pb, final_pressure_vis_pb, pressure_vis_pr, geom_vis, final_pressure_vis_pr, validation_vis = statuses
 
         def _toggle_win(fig, is_visible):
             """Helper to safely toggle a window's visibility."""
@@ -1097,6 +1259,7 @@ class InteractiveTuner:
         _toggle_win(self.pr_pressure_fig, pressure_vis_pr)
         _toggle_win(self.pr_final_pressure_fig, final_pressure_vis_pr)
         _toggle_win(self.geometry_fig, geom_vis)
+        _toggle_win(self.validation_fig, validation_vis)
 
     def toggle_filters(self, label):
         self.use_median_filter, self.use_ema_filter, self.use_pressure_offset = self.check_filters.get_status()
@@ -1303,20 +1466,374 @@ class InteractiveTuner:
         self.run_auto_initial_time_detection()
 
     def open_file_dialog(self, event):
-        """Opens a file dialog to select a CSV file."""
+        """
+        Opens a file dialog to select one or more CSV files.
+        If multiple files are selected, it processes each one and automatically
+        exports the results to 'surffit.csv'.
+        """
         # We don't need to create and destroy a new Tk root window here.
         # Matplotlib's TkAgg backend already manages a root window, and creating
         # a new one and destroying it can interfere with the main event loop.
-        filepath = filedialog.askopenfilename(
+        filepaths = filedialog.askopenfilenames(
             initialdir=os.path.expanduser('~/wheel_loader_ws/results/csv/settle/'),
-            title="Select a CSV file",
+            title="Select one or more CSV files",
             filetypes=(("CSV files", "*.csv"), ("All files", "*.*"))
         )
 
-        if filepath:
-            self.load_file(filepath)
+        if filepaths:
+            print(f"\n--- Processing {len(filepaths)} files for surf fit export ---")
+            for filepath in filepaths:
+                self.load_file(filepath)
+                self.export_for_surf_fit(None) # Auto-export for each file
+            print("--- All files processed and exported. ---")
         else:
             print("File selection cancelled.")
+
+    def export_for_surf_fit(self, event):
+        """
+        Exports the calculated mass for each target theta_g into a wide-format CSV
+        named 'surffit.csv', suitable for surface fitting analysis.
+        """
+        output_filename = os.path.join(self.workspace_root, 'surffit.csv')
+        
+        # 1. Check if there is data to export
+        if not self.surf_fit_export_data:
+            print("Export Error: No target mass data available to export. Please run an analysis first.")
+            return
+
+        # 2. Parse the load value from the current filename to use as a column header
+        # Example: "downstair_3.15" -> "3.15t"
+        match = re.search(r'(\d+\.?\d*)', self.current_filename)
+        if not match:
+            print(f"Export Error: Could not parse load value (e.g., '3.15') from filename '{self.current_filename}' to create CSV header.")
+            return
+        load_val_str = match.group(1)
+        new_col_name = f"{load_val_str}t"
+
+        # 3. Prepare the new data into a DataFrame, rounding theta_g and ensuring uniqueness
+        new_data_list = [{'theta_g': d['theta_g'], new_col_name: d['mass']} for d in self.surf_fit_export_data]
+        new_df = pd.DataFrame(new_data_list)
+        new_df['theta_g'] = new_df['theta_g'].round(1)
+        # If multiple static points round to the same theta_g, take their average mass
+        new_df = new_df.groupby('theta_g', as_index=False).mean()
+
+        # 4. Read existing file or create a new DataFrame if it doesn't exist
+        if os.path.exists(output_filename):
+            try:
+                existing_df = pd.read_csv(output_filename)
+                if new_col_name in existing_df.columns:
+                    existing_df = existing_df.drop(columns=[new_col_name])
+                
+                final_df = pd.merge(existing_df, new_df, on='theta_g', how='outer')
+            except Exception as e:
+                print(f"Error reading or merging with existing '{output_filename}': {e}")
+                print("Creating a new file instead.")
+                final_df = new_df
+        else:
+            final_df = new_df
+
+        # 5. Consolidate the final dataframe to ensure one row per theta_g
+        # This cleans up duplicates from previous buggy exports and the current merge.
+        # We group by 'theta_g' and take the first non-null value for each load column.
+        final_df = final_df.groupby('theta_g', as_index=False).first()
+
+        # 6. Sort by theta_g (descending) and save to CSV
+        try:
+            final_df = final_df.sort_values(by='theta_g', ascending=False).reset_index(drop=True)
+            final_df.to_csv(output_filename, index=False, float_format='%.1f')
+            print(f"Successfully exported/updated data to '{os.path.abspath(output_filename)}'")
+        except Exception as e:
+            print(f"Error saving data to '{output_filename}': {e}")
+
+    def validate_and_export(self, event):
+        """
+        Reads the INPUT data (w and theta_g) from surffit.csv, applies the CURRENT
+        estimation model to get the final load, calculates statistics, and saves
+        the results to validate.csv.
+        """
+        source_filename = os.path.join(self.workspace_root, 'surffit.csv')
+        output_filename = os.path.join(self.workspace_root, 'validate.csv')
+
+        if not os.path.exists(source_filename):
+            print(f"Error: Source file '{source_filename}' not found. Please use 'Export for Surf Fit' first.")
+            return
+
+        try:
+            df_input = pd.read_csv(source_filename)
+        except Exception as e:
+            print(f"Error reading '{source_filename}': {e}")
+            return
+
+        # Create a new dataframe to store the results of the CURRENT model
+        df_results = df_input.copy()
+
+        # Identify load columns and theta_g column
+        if 'theta_g' not in df_results.columns:
+            print("Error: 'theta_g' column not found in surffit.csv.")
+            return
+        
+        load_cols = sorted([col for col in df_results.columns if col.endswith('t') and col[0].isdigit()], key=lambda x: float(x.replace('t','')))
+        if not load_cols:
+            print("Error: No load columns (e.g., '1.2t') found in surffit.csv.")
+            return
+
+        # --- Re-calculate final estimated load (yy) using the CURRENT model settings ---
+        for col in load_cols:
+            for index, row in df_results.iterrows():
+                w = row[col] # This is simple_lever from surffit.csv
+                theta_g_raw = row['theta_g']
+                
+                if pd.isna(w) or pd.isna(theta_g_raw):
+                    continue
+
+                # Apply the currently selected compensation model
+                if self.use_surf_fit:
+                    scope = {'w': w, 'theta_g': theta_g_raw, 'np': np}
+                    final_mass_tons = eval(self.surf_fit_rhs, {'np': np}, scope)
+                    final_mass_kg = final_mass_tons * 1000
+                elif self.use_compensation:
+                    theta_a = theta_g_raw + self.theta_g_offset
+                    compensator = self.k1 * theta_a + self.k2
+                    final_mass_kg = w + compensator
+                else: # No compensation
+                    final_mass_kg = w
+                
+                df_results.at[index, col] = final_mass_kg
+
+        # --- Now perform validation on the newly calculated df_results ---
+        # --- 1. Calculate RMSE_s (row-wise) ---
+        rmse_s_values = []
+        actual_loads_kg = np.array([float(col.replace('t', '')) * 1000 for col in load_cols])
+
+        for index, row in df_results.iterrows():
+            predicted_loads = row[load_cols].to_numpy(dtype=float)
+            
+            valid_mask = ~np.isnan(predicted_loads)
+            if not np.any(valid_mask):
+                rmse_s_values.append(np.nan)
+                continue
+
+            valid_predicted = predicted_loads[valid_mask]
+            valid_actual = actual_loads_kg[valid_mask]
+
+            squared_errors = (valid_predicted - valid_actual) ** 2
+            rmse_s = np.sqrt(np.mean(squared_errors))
+            rmse_s_values.append(rmse_s)
+        
+        df_results['RMSE_s'] = rmse_s_values
+
+        # --- 2. Calculate avg and RMSE_w (column-wise) ---
+        avg_row = {'theta_g': 'avg'}
+        rmse_w_row = {'theta_g': 'RMSE_w'}
+
+        for col in load_cols:
+            predicted_col = df_results[col].dropna()
+            
+            if not predicted_col.empty:
+                avg_row[col] = predicted_col.mean()
+                actual_load_kg = float(col.replace('t', '')) * 1000
+                squared_errors_col = (predicted_col - actual_load_kg) ** 2
+                rmse_w = np.sqrt(squared_errors_col.mean())
+                rmse_w_row[col] = rmse_w
+            else:
+                avg_row[col] = np.nan
+                rmse_w_row[col] = np.nan
+        
+        summary_df = pd.DataFrame([avg_row, rmse_w_row])
+
+        # --- 3. Combine and save ---
+        df_results['theta_g'] = df_results['theta_g'].astype(object)
+        validate_df = pd.concat([df_results, summary_df], ignore_index=True)
+
+        try:
+            validate_df.to_csv(output_filename, index=False, float_format='%.1f')
+            print(f"Successfully created validation file with CURRENT model data: '{os.path.abspath(output_filename)}'")
+        except Exception as e:
+            print(f"Error saving data to '{output_filename}': {e}")
+            return
+
+        # --- 4. Visualize the validation results ---
+        try:
+            # Check if the figure has been closed by the user. If so, recreate it.
+            # Using plt.fignum_exists is a backend-agnostic way to check.
+            if not plt.fignum_exists(self.validation_fig.number):
+                print("Validation figure was closed. Recreating it.")
+                self.validation_fig, (self.ax_rmse_s, self.ax_rmse_w) = plt.subplots(2, 1, num='Figure 8: Validation', figsize=(10, 8))
+                self.validation_fig.subplots_adjust(left=0.08, bottom=0.08, right=0.95, top=0.92, hspace=0.4)
+                
+                # Ensure the checkbox in the control panel reflects that the figure is now visible.
+                # 'Validation' is the 4th item in the 2nd list (index 3).
+                if not self.check_figs2.get_status()[3]:
+                    self.check_figs2.set_active(3)
+
+            self.ax_rmse_s.clear()
+            self.ax_rmse_w.clear()
+
+            # Determine which equation is being used for the title
+            if self.use_surf_fit:
+                equation_str = f"Using Surface Fit: load = {self.surf_fit_rhs}"
+            elif self.use_compensation:
+                equation_str = f"Using Compensator: w_comp = {self.k1:.2f}*θa + {self.k2:.2f}"
+            else:
+                equation_str = "Using Simple Lever Model (No Compensation)"
+
+            # Subplot 1: RMSE_s vs theta_g
+            plot_df = validate_df[pd.to_numeric(validate_df['theta_g'], errors='coerce').notna()].copy()
+            if not plot_df.empty:
+                plot_df['theta_g'] = plot_df['theta_g'].astype(float)
+                plot_df = plot_df.sort_values(by='theta_g')
+                
+                self.ax_rmse_s.bar(plot_df['theta_g'].astype(str), plot_df['RMSE_s'], color='skyblue', edgecolor='black')
+                self.ax_rmse_s.set_title('Model Accuracy at different Boom Angles (RMSE_s)')
+                self.ax_rmse_s.set_xlabel('Boom Angle, theta_g (rad)')
+                self.ax_rmse_s.set_ylabel('RMSE_s (kg)')
+                self.ax_rmse_s.grid(axis='y', linestyle='--', alpha=0.7)
+
+            # Subplot 2: RMSE_w vs Load
+            if 'RMSE_w' in validate_df['theta_g'].values:
+                rmse_w_series = validate_df[validate_df['theta_g'] == 'RMSE_w'].iloc[0]
+                rmse_w_values = rmse_w_series[load_cols].astype(float)
+
+                self.ax_rmse_w.bar(load_cols, rmse_w_values, color='lightgreen', edgecolor='black')
+                self.ax_rmse_w.set_title('Model Accuracy across different Loads (RMSE_w)')
+                self.ax_rmse_w.set_xlabel('Actual Load (t)')
+                self.ax_rmse_w.set_ylabel('RMSE_w (kg)')
+                self.ax_rmse_w.grid(axis='y', linestyle='--', alpha=0.7)
+
+            self.validation_fig.suptitle(f'Validation Analysis\n({equation_str})', fontsize=12)
+            self.validation_fig.tight_layout(rect=[0, 0.03, 1, 0.92])
+            self.validation_fig.canvas.draw_idle()
+
+            # Bring the validation figure to the front
+            manager = self.validation_fig.canvas.manager
+            # Use winfo_exists() for a robust check with the Tk backend to prevent crash
+            if manager and hasattr(manager, 'window') and manager.window.winfo_exists():
+                manager.window.deiconify()
+                manager.window.lift()
+                manager.window.attributes('-topmost', 1)
+                manager.window.attributes('-topmost', 0)
+        except Exception as e:
+            print(f"Error during validation plotting: {e}")
+
+    def set_and_apply_surf_fit_equation(self, eq_rhs):
+        """Updates the surface fit equation and replots."""
+        print(f"Applying new surface fit equation: {eq_rhs}")
+        self.surf_fit_rhs = eq_rhs
+        self.recalculate_and_plot()
+
+    def apply_deg1_equation(self, event):
+        """Applies the stored Degree 1 equation."""
+        self.set_and_apply_surf_fit_equation(self.eq_deg1_rhs)
+
+    def apply_best_equation(self, event):
+        """Applies the stored Best Fit equation."""
+        self.set_and_apply_surf_fit_equation(self.eq_best_rhs)
+
+    def process_ui_updates(self):
+        """
+        Checks the queue for UI updates from background threads and processes them.
+        This runs on the main GUI thread.
+        """
+        try:
+            # Get an update from the queue without blocking
+            status, data = self.ui_update_queue.get_nowait()
+            self._update_ui_with_fit_results(status, data)
+        except queue.Empty:
+            pass  # No updates in the queue
+        finally:
+            # Reschedule this method to run again after 100ms
+            self.control_fig.canvas.get_tk_widget().after(100, self.process_ui_updates)
+
+    def _update_ui_with_fit_results(self, status, data=None):
+        """
+        Safely updates the GUI with results from the background thread.
+        This method is designed to be called via `canvas.after()`.
+        """
+        if status == "error_script_not_found":
+            self.text_eq_deg1.set_text("Eq Deg 1: Script not found.")
+            self.text_eq_best.set_text("Eq Best: Script not found.")
+        elif status == "error_running_script":
+            self.text_eq_deg1.set_text("Eq Deg 1: Error running script.")
+            self.text_eq_best.set_text("Eq Best: Error running script.")
+        elif status == "error_parsing":
+            self.text_eq_deg1.set_text("Eq Deg 1: Error parsing script output.")
+            self.text_eq_best.set_text("Eq Best: Error parsing script output.")
+        elif status == "success" and data:
+            eq_deg1_full, self.eq_deg1_rhs, eq_best_full, self.eq_best_rhs, self.eq_best_degree = data
+            self.text_eq_deg1.set_text(eq_deg1_full)
+            self.text_eq_best.set_text(eq_best_full)
+            self.btn_apply_deg1.ax.set_visible(True)
+            self.btn_apply_best.ax.set_visible(self.eq_best_degree > 1)
+        
+        self.control_fig.canvas.draw_idle()
+
+    def find_surf_fit_equations(self, event):
+        """
+        Runs surface_fit.py in a background thread to avoid freezing the GUI,
+        and then updates the UI with the found equations.
+        """
+        def worker():
+            """The function that will run in the background thread."""
+            script_path = os.path.join(os.path.dirname(__file__), 'surface_fit.py')
+            if not os.path.exists(script_path):
+                print(f"Error: Script not found: {script_path}")
+                self.ui_update_queue.put(("error_script_not_found", None))
+                return
+
+            try:
+                # Execute the script and capture output
+                result = subprocess.run(
+                    ['python3', script_path, '--no-plot'],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    cwd=os.path.expanduser('~/wheel_loader_ws/') # Run from ws root to find surffit.csv
+                )
+                output = result.stdout
+                print(output)
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                error_msg = f"Failed to execute surface_fit.py. Error: {e}"
+                print(error_msg)
+                if hasattr(e, 'stderr'):
+                    print(f"\nStderr:\n{e.stderr}")
+                self.ui_update_queue.put(("error_running_script", None))
+                return
+
+            try:
+                deg1_match = re.search(r"--- Degree 1 Equation ---\s*\n(.*?)\n", output, re.DOTALL)
+                best_fit_match = re.search(r"--- Best Fit \(Degree (\d+)\) Equation ---\s*\n(.*?)\n", output, re.DOTALL)
+                if not deg1_match:
+                    raise ValueError("Could not parse Degree 1 equation from script output.")
+
+                eq_deg1_full = deg1_match.group(1).strip()
+                eq_deg1_rhs = eq_deg1_full.split(' = ', 1)[1]
+
+                best_degree = 1
+                if best_fit_match:
+                    best_degree = int(best_fit_match.group(1))
+                    eq_best_full = best_fit_match.group(2).strip()
+                    eq_best_rhs = eq_best_full.split(' = ', 1)[1]
+                else:
+                    eq_best_rhs = eq_deg1_rhs
+                    eq_best_full = eq_deg1_full
+                
+                results_data = (eq_deg1_full, eq_deg1_rhs, eq_best_full, eq_best_rhs, best_degree)
+                self.ui_update_queue.put(("success", results_data))
+
+            except (ValueError, IndexError) as e:
+                print(f"Could not parse equations from surface_fit.py output.\nError: {e}")
+                self.ui_update_queue.put(("error_parsing", None))
+
+        # This part runs in the main GUI thread
+        print("Running surface_fit.py to find new equations...")
+        self.text_eq_deg1.set_text("Eq Deg 1: Running...")
+        self.text_eq_best.set_text("Eq Best: Running...")
+        self.control_fig.canvas.draw_idle()
+        
+        # Create and start the background thread
+        thread = threading.Thread(target=worker)
+        thread.daemon = True  # Allows main program to exit even if the thread is running
+        thread.start()
 
 
 def main():

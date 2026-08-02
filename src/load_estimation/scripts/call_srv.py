@@ -10,7 +10,6 @@ class ServiceCallerNode(Node):
     def __init__(self):
         super().__init__('load_estimate_caller_node')
 
-        # Constants from load_estimate.py
         self.vel_threshold = 0.003
         self.acc_threshold = 0.005
         self.theta_g_offset = -0.62
@@ -24,7 +23,7 @@ class ServiceCallerNode(Node):
         self.vel_g = None
         self.acc_g = None
         self.is_moving = True
-        self.service_call_in_progress = False # To prevent overlapping calls
+        self.service_call_in_progress = False
 
         # For derivatives
         self.theta_g_history = deque(maxlen=3)
@@ -84,25 +83,24 @@ class ServiceCallerNode(Node):
         if self.vel_g is None or self.acc_g is None:
             return
 
-        # State machine logic to detect transition from moving to static
         currently_static = abs(self.vel_g) < self.vel_threshold and abs(self.acc_g) < self.acc_threshold
 
         if currently_static:
-            # If we just transitioned from moving to static
-            if self.is_moving:
+            if self.is_moving and not self.service_call_in_progress:
                 self.get_logger().info(f"static met: vel={self.vel_g:.4f}, acc={self.acc_g:.4f}). Call service")
                 self.call_load_estimate_service()
-            self.is_moving = False
+                self.is_moving = False
         else:  # is moving
-            self.is_moving = True
+            if not self.is_moving:
+                self.is_moving = True
 
     def call_load_estimate_service(self):
         if self.service_call_in_progress:
-            self.get_logger().warn("Service call is already in progress. Skipping new request.", throttle_duration_sec=5)
+            # self.get_logger().warn("Service call is already in progress. Skipping new request.", throttle_duration_sec=5)
             return
 
         if not self.client.service_is_ready():
-            self.get_logger().warn("Service /load_estimate not available, skipping call.", throttle_duration_sec=5)
+            # self.get_logger().warn("Service /load_estimate not available, skipping call.", throttle_duration_sec=5)
             return
 
         self.service_call_in_progress = True

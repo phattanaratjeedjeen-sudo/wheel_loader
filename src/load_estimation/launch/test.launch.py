@@ -66,7 +66,7 @@ def generate_launch_description():
         juggler_layout_arg,
         bags_dir_arg,
         plotjuggler_node,
-        call_srv_node,
+        # call_srv_node,
         monitor_node,
         find_and_play_bag_action,
         load_estimation_node,

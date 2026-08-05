@@ -27,8 +27,6 @@ ament_python_install_package(${PROJECT_NAME})
 
 # Install Python executables
 install(PROGRAMS
-  scripts/raw_data.py
-  scripts/call_srv.py
   scripts/load_estimate.py
   DESTINATION lib/${PROJECT_NAME}
 )
@@ -50,8 +48,6 @@ install(TARGETS
 ################ INSTALL LAUNCH, ETC #################
 install(DIRECTORY
   # add directories here
-  config
-  launch
   DESTINATION share/${PROJECT_NAME})
 
 ament_package()

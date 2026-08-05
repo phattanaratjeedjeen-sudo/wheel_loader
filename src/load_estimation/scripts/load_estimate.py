@@ -36,9 +36,9 @@ class LoadEstimationNode(Node):
         self.IGO = np.pi - (np.arctan2(LgiY, LgiX))   # (rad)
 
         # compensator
-        self.k1 = -0.2019               # (ton)
-        self.k2 = 1.0482e-03            # constant
-        self.k3 = 4.4910e-01            # (ton/rad)
+        self.k1 = -0.2353               # (ton)
+        self.k2 = 1.0570e-03            # constant
+        self.k3 = 4.4962e-01            # (ton/rad)
 
         # pressure predict model    
         self.est_time = 1.0             # duration for estimate (s)
@@ -211,6 +211,8 @@ class LoadEstimationNode(Node):
         # empty bucket offset (sensor val)
         pb_offset = 1699*(theta_a-self.theta_g_offset) + 4023
         pr_offset = 413.3
+        pb = pbf - pb_offset
+        pr = prf - pr_offset
 
         # geometry
         Lih = np.sqrt(self.Lgh**2 + self.Lgi**2 - 2 * self.Lgh * self.Lgi * np.cos(theta_a + self.IGO))
@@ -218,9 +220,8 @@ class LoadEstimationNode(Node):
         HIO = np.pi - self.IGO - GIH
         a = np.sin(HIO) - np.cos(HIO) * np.tan(theta_a)
 
-        pb = pbf - pb_offset
-        pr = prf - pr_offset
-        Fc = 2 * (self.ab * pb - self.ar * pr) * self.toPa  # cylinder force (N)
+        # cylinder force (N)
+        Fc = 2 * (self.ab * pb - self.ar * pr) * self.toPa  
 
         # estimated mass (ton)
         simple_lever_kg = ((Fc * self.Lgh / self.Lag) * a)/9.807
@@ -286,7 +287,7 @@ class LoadEstimationNode(Node):
             response.message = f'{str(e)}'
             self.get_logger().error(f"Load estimation failed: {str(e)}")
         finally:
-            # Ensure state is reset for the next service call
+            # reset for the next service call
             with self.srv_lock:
                 self.srv_in_progress = False
                 self.theta_g_at_call = None

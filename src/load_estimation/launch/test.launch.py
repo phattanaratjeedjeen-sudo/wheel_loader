@@ -10,7 +10,6 @@ from ament_index_python.packages import get_package_share_directory
 def find_and_play_bag(context, *args, **kwargs):
     """Finds the latest rosbag in a directory and creates an ExecuteProcess action to play it."""
     bags_dir = LaunchConfiguration('bags_dir').perform(context)
-
     bag_folders = glob.glob(os.path.join(bags_dir, 'rosbag2_*'))
 
     if not bag_folders:

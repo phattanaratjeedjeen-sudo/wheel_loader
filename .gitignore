@@ -1,12 +1,10 @@
-note/
+note
 
 build/
 install/
 log/
 
-matlab/slprj
-docker_launch.md
+matlab
 
-# results/bag
-# results/csv
+# results
 # src/load_estimation/scripts/others

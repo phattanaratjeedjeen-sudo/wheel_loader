@@ -1,14 +1,10 @@
 note
-results
-material
+
+build/
+install/
+log/
+
 matlab
 
-build
-install
-log
-
-src/load_estimation/config
+results
 src/load_estimation/scripts/others
-src/load_estimation/launch
-
-src/load_estimation_interfaces

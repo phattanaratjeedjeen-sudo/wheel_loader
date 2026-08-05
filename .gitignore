@@ -6,5 +6,5 @@ log/
 
 matlab
 
-# results
-# src/load_estimation/scripts/others
+results
+src/load_estimation/scripts/others

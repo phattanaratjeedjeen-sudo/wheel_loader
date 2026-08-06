@@ -1,8 +1,8 @@
 note
 
-build/
-install/
-log/
+build
+install
+log
 
 matlab
 

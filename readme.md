@@ -55,15 +55,17 @@ The weight of the loader's arm and bucket assembly exerts force on the hydraulic
 
 The offset models are:
 
-`p_b_offset = 1699 * θ_g + 4023`
+`p_b_offset = c1 * θ_g + c2`
 
-`p_r_offset = 413.3`
+`p_r_offset = c3`
 
 | Parameter | Value | Description |
 | :--- | :--- | :--- |
-| `p_b_offset` | - | The pressure offset for the bottom side of the cylinders (ADC value). |
-| `p_r_offset` | `413.3` | The pressure offset for the rod side of the cylinders (ADC value). |
+| `c1` | `1699` | Coefficient for the boom angle in the `p_b_offset` model. |
+| `c2` | `4023` | Intercept for the `p_b_offset` model (ADC value). |
+| `c3` | `413.3` | Constant value for the `p_r_offset` model (ADC value). |
 | `θ_g` | - | The boom angle from the encoder (rad). |
+
 
 ### Simple Beam Model
 
@@ -107,9 +109,9 @@ The final load is calculated as:
 | :--- | :--- | :--- |
 | `w_simple` | - | The initial load estimate from the Simple Beam Model (kg). |
 | `θ_g` | - | The raw boom angle from the encoder (rad). |
-| `k1` | `-0.2353` | Intercept term (ton). |
-| `k2` | `1.057e-03` | Coefficient for the simple model's output. |
-| `k3` | `0.4962` | Coefficient for the boom angle. |
+| `k1` | `-0.2494` | Intercept term (ton). |
+| `k2` | `1.0643e-03` | Coefficient for the simple model's output. |
+| `k3` | `5.1622e-01` | Coefficient for the boom angle. |
 
 ## Results
 

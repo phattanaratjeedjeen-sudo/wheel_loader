@@ -35,10 +35,15 @@ class LoadEstimationNode(Node):
         self.Lgi = np.sqrt(LgiY**2 + LgiX**2)         # (m)  
         self.IGO = np.pi - (np.arctan2(LgiY, LgiX))   # (rad)
 
+        # empty bucket pressure
+        self.c1 = 1699
+        self.c2 = 4023
+        self.c3 = 413.3
+
         # compensator
-        self.k1 = -0.2353               # (ton)
-        self.k2 = 1.0570e-03            # constant
-        self.k3 = 4.4962e-01            # (ton/rad)
+        self.k1 = -0.2494               # (ton)
+        self.k2 = 1.0643e-03            # constant
+        self.k3 = 5.1622e-01            # (ton/rad)
 
         # pressure predict model    
         self.est_time = 1.0             # duration for estimate (s)
@@ -209,10 +214,9 @@ class LoadEstimationNode(Node):
 
     def calculate_load_mass(self, pbf, prf, theta_a):
         # empty bucket offset (sensor val)
-        pb_offset = 1699*(theta_a-self.theta_g_offset) + 4023
-        pr_offset = 413.3
+        pb_offset = self.c1*(theta_a-self.theta_g_offset) + self.c2
         pb = pbf - pb_offset
-        pr = prf - pr_offset
+        pr = prf - self.c3
 
         # geometry
         Lih = np.sqrt(self.Lgh**2 + self.Lgi**2 - 2 * self.Lgh * self.Lgi * np.cos(theta_a + self.IGO))
@@ -234,7 +238,7 @@ class LoadEstimationNode(Node):
             if self.srv_in_progress:
                 response.success = False
                 response.message = "Service is already busy. Please try again later."
-                self.get_logger().warn("Received a service call while another was in progress.")
+                # self.get_logger().warn("Received a service call while another was in progress.")
                 return response
             self.srv_in_progress = True
 
@@ -245,14 +249,14 @@ class LoadEstimationNode(Node):
             # --- Part 1: Wait for static & downward condition ---
             with self.srv_lock:
                 self.theta_g_at_call = self.theta_g_raw
-                self.get_logger().info(f"Service called. Waiting for static & downward condition. Initial theta_g: {self.theta_g_at_call:.3f}")
+                # self.get_logger().info(f"Service called. Waiting for static & downward condition. Initial theta_g: {self.theta_g_at_call:.3f}")
                 
                 wait_successful = self.srv_wait_condition.wait(timeout=self.srv_timeout)
                 
                 if not wait_successful:
                     raise Exception(f"Timeout: Static conditions not met within {self.srv_timeout} seconds.")
 
-            self.get_logger().info(f"Conditions met: Static (vel={self.vel_a:.4f}, acc={self.acc_a:.4f}), Downward (theta_g={self.theta_g_raw:.3f} < {self.theta_g_at_call:.3f})")
+            # self.get_logger().info(f"Conditions met: Static (vel={self.vel_a:.4f}, acc={self.acc_a:.4f}), Downward (theta_g={self.theta_g_raw:.3f} < {self.theta_g_at_call:.3f})")
 
             # --- Part 2: Estimate pressure over a duration ---
             with self.srv_lock:
@@ -285,7 +289,7 @@ class LoadEstimationNode(Node):
         except Exception as e:
             response.success = False
             response.message = f'{str(e)}'
-            self.get_logger().error(f"Load estimation failed: {str(e)}")
+            # self.get_logger().error(f"Load estimation failed: {str(e)}")
         finally:
             # reset for the next service call
             with self.srv_lock:

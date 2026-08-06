@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 
-# from load_estimation.dummy_module import dummy_function, dummy_var
 import rclpy
 from rclpy.node import Node
 

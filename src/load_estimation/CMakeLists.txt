@@ -28,7 +28,6 @@ ament_python_install_package(${PROJECT_NAME})
 # Install Python executables
 install(PROGRAMS
   scripts/raw_data.py
-  scripts/call_srv.py
   scripts/load_estimate.py
   DESTINATION lib/${PROJECT_NAME}
 )

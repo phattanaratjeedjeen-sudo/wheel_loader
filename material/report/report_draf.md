@@ -46,7 +46,7 @@ The final load estimation is the result of a multi-stage process that filters ra
 ## Simple Beam Model
 
 <p align="center">
-  <img src="./material/simple_beam.png" alt="simple_beam_model" width="500">
+  <img src="../simple_beam.png" alt="Simple Beam Model" width="500">
 </p>
 
 To translate the force from the hydraulic cylinders into an estimated load, the arm-bucket assembly is modeled as a **simple beam system**. This provides a physics-based initial estimate of the bucket load (`w_simple`) based on the known geometry and the calculated cylinder force.
@@ -147,7 +147,7 @@ The final load is calculated as:
 ### ROS2 Structure
 
 <p align="center">
-  <img src="./material/ros_structure.png" alt="simple_beam_model" width="800">
+  <img src="../ros_structure.png" alt="ROS 2 Structure for /load_estimation_node" width="800">
 </p>
 
 ### Flowchart
@@ -294,7 +294,7 @@ By vary the load(water) and boom angle, then calculate
 The implemented methodology yields a load estimation with an accuracy of **~±100kg** for a full bucket capacity of 3tons, under the specified operating conditions (**theta_g = 0.3-0.6 rad**).
 
 <p align="center">
-  <img src="./material/validation.png" alt="simple_beam_model" width="800">
+  <img src="../validation.png" alt="Validation Analysis" width="800">
 </p>
 
 # Conclusion
